@@ -1,0 +1,15 @@
+# Нормализуем переводы строк: в репозитории всегда LF, независимо от ОС
+* text=auto eol=lf
+
+# Скрипты, которые обязаны иметь конкретный EOL
+*.sh   text eol=lf
+*.ps1  text eol=crlf
+*.bat  text eol=crlf
+
+# Бинарные файлы не трогаем
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary

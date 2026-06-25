@@ -1,0 +1,44 @@
+# === Секреты и креды — НИКОГДА не коммитить ===
+.env
+.env.*
+*.key
+*.pem
+*.crt
+*.p12
+secrets/
+config.toml              # mtg: содержит FakeTLS-секрет, генерится на сервере
+mtg/config.toml
+!*.example
+
+# === Terraform ===
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+# .terraform.lock.hcl — НЕ игнорируем: lock-файл должен быть в гите
+
+# === Ansible ===
+*.retry
+vault-password*
+.vault_pass*
+*.vault
+
+# === Логи и временное ===
+*.log
+tmp/
+
+# === Python (скрипты/утилиты) ===
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# === ОС и редакторы ===
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
