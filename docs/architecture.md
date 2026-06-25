@@ -25,7 +25,7 @@
 
 | Компонент | Роль | Где живёт |
 |---|---|---|
-| VPS (Ubuntu/Debian) | Хост с публичным IP | арендованный сервер |
+| VPS (Ubuntu/Debian) | Хост с публичным IP | Timeweb Cloud, ЕС (Амстердам) |
 | Xray-core | Движок VLESS + Reality + XTLS-Vision | systemd на VPS |
 | 3x-ui | Панель управления + выдача подписок | systemd на VPS |
 | Shadowsocks-2022 | Резервный протокол | inbound в Xray |
@@ -154,7 +154,7 @@ flowchart LR
 
 ## Открытые вопросы
 
-- Выбор провайдера VPS и регистратора домена (этап VPS).
+- Регистратор и сам домен для подписки `sub.ДОМЕН` (этап DNS).
 - Конкретный маскировочный домен для Reality (Dest/SNI).
 - Стратегия и периодичность бэкапа `x-ui.db`.
 
@@ -163,3 +163,4 @@ flowchart LR
 - [ADR-0002: стек VPN](adr/0002-vpn-stack-xray-reality.md)
 - [ADR-0003: доставка через подписку и домен](adr/0003-subscription-delivery-and-migration.md)
 - [ADR-0004: инфраструктура как код с самого начала](adr/0004-iac-from-the-start.md)
+- [ADR-0005: провайдер VPS — Timeweb Cloud](adr/0005-vps-provider-timeweb.md)
