@@ -4,10 +4,11 @@
 > подписками и быстрым переносом между VPS.
 
 **Статус:** 🚧 активная разработка. Готовы безопасный Ansible-bootstrap VPS,
-ручная настройка 3x-ui/Xray с VLESS Reality на `443/tcp`, схема домена для
-клиентских ссылок и runbook первого бэкапа. Панель 3x-ui закрыта за
-SSH-туннелем. Следующие этапы — Shadowsocks-2022, публичные subscription-ссылки,
-Telegram-прокси `mtg` и автоматизация сервисов через Ansible.
+ручная настройка 3x-ui/Xray с VLESS Reality на `443/tcp`, runbook первого
+бэкапа, схема домена для клиентских ссылок и инструкция для резервного
+Shadowsocks-2022. Панель 3x-ui закрыта за SSH-туннелем. Следующие этапы —
+проверка Shadowsocks на VPS, публичные subscription-ссылки, Telegram-прокси
+`mtg` и автоматизация сервисов через Ansible.
 
 ## Что это
 
@@ -72,6 +73,7 @@ VPS:
 - [Журнал архитектурных решений (ADR)](docs/adr/)
 - [Runbook: bootstrap VPS через Ansible](docs/runbooks/bootstrap-vps-ansible.md)
 - [Runbook: ручная настройка 3x-ui и VLESS Reality](docs/runbooks/setup-xui-vless-reality.md)
+- [Runbook: резервный Shadowsocks-2022](docs/runbooks/setup-shadowsocks-2022.md)
 - [Runbook: домен и subscription-ссылки](docs/runbooks/domain-and-subscriptions.md)
 - [Runbook: бэкап 3x-ui](docs/runbooks/backup-xui.md)
 - [Runbook: миграция на новый VPS](docs/runbooks/migrate-vps.md)
