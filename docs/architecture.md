@@ -30,7 +30,7 @@
 | VPS (Ubuntu/Debian) | Хост с публичным IP | reseller-VPS, ручная выдача |
 | Xray-core | Движок VLESS + Reality + XTLS-Vision | systemd на VPS |
 | 3x-ui | Панель управления + выдача подписок | systemd на VPS |
-| Shadowsocks-2022 | Резервный протокол | inbound в Xray |
+| Резервный протокол | Дополнительный профиль при проблемах с VLESS Reality | выбирается отдельным этапом |
 | mtg | Telegram MTProto, режим FakeTLS | Docker на VPS |
 | ufw + fail2ban | Фаервол и защита от брутфорса | systemd на VPS |
 | Домен + DNS | Стабильный адрес подписки | внешний DNS (напр. Cloudflare) |
@@ -43,7 +43,7 @@
 |---|---|---|
 | 22/tcp | SSH | управление сервером (по ключам) |
 | 443/tcp | VLESS + Reality | основной VPN-трафик |
-| 8388/tcp | Shadowsocks-2022 | резервный VPN-трафик |
+| 8388/tcp | резервный протокол | закрыт, пока резервный inbound не используется |
 | 8443/tcp | MTProto FakeTLS | Telegram через mtg |
 | случайный | HTTP на localhost | панель 3x-ui (закрыта, доступ через SSH-туннель) |
 
@@ -100,9 +100,9 @@
 
 ### Резерв на уровне протокола
 
-Если режут именно Reality, но не весь сервер — клиенты переключаются на
-профиль **Shadowsocks** (он в той же подписке). Это защита от блокировки
-протокола, а миграция выше — защита от бана IP.
+Если режут именно Reality, но не весь сервер, нужен второй проверенный профиль.
+Он должен добавляться отдельным этапом после backup и теста клиента. В текущем
+production-checkpoint резервный inbound выключен, а порт `8388/tcp` закрыт.
 
 ## Инфраструктура как код
 
@@ -110,10 +110,10 @@
 **Terraform отложен** до будущих версий. Первый Ansible-bootstrap уже реализован:
 он запускается прямо на VPS через локальный inventory (ADR-0007), создаёт
 администратора по SSH-ключу и настраивает базовую защиту. Второй этап пройден
-вручную и закреплён runbook'ом: 3x-ui/Xray, панель через SSH-туннель и VLESS
-Reality на `443/tcp`. Для резервного Shadowsocks-2022 подготовлен отдельный
-runbook. Следующая цель — проверить резервный inbound на VPS, затем
-кодифицировать ручные этапы в Ansible и добавить mtg.
+вручную и закреплён runbook'ами: 3x-ui/Xray, панель через SSH-туннель, VLESS
+Reality на `443/tcp` и production-checkpoint VLESS-only. Следующая цель —
+кодифицировать ручные этапы в Ansible, затем выбрать резервный протокол и
+добавить mtg.
 
 ```
 infra/
@@ -153,7 +153,7 @@ flowchart LR
     subgraph V["VPS — IP расходник"]
         panel["3x-ui: панель + подписки"]
         xray["Xray: VLESS+Reality+Vision :443"]
-        ss["Shadowsocks-2022 :8388"]
+        ss["Резервный протокол (отложено)"]
         mtg["mtg: MTProto FakeTLS :8443"]
         fw["ufw + fail2ban"]
     end
@@ -162,7 +162,7 @@ flowchart LR
 
     app -- "обновить подписку (https)" --> dns --> panel
     app -- "VPN :443" --> xray
-    app -- "резерв :8388" --> ss
+    app -. "резерв после отдельной проверки" .-> ss
     app -- "Telegram :8443" --> mtg
     panel -. "восстановление при переезде" .- backup
 ```
@@ -171,7 +171,7 @@ flowchart LR
 
 - Регистратор и сам домен для подписки `sub.ДОМЕН` (этап DNS).
 - Периодичность бэкапа базы 3x-ui и проверка восстановления на отдельном VPS.
-- Проверка Shadowsocks-2022 на VPS.
+- Выбор и проверка резервного протокола.
 - Автоматизация ручных этапов 3x-ui/Xray через Ansible.
 
 ## Связанные решения
@@ -182,3 +182,4 @@ flowchart LR
 - [ADR-0005: провайдер VPS — Timeweb Cloud](adr/0005-vps-provider-timeweb.md) (заменён)
 - [ADR-0006: ручной provisioning, Terraform отложен](adr/0006-manual-provisioning-defer-terraform.md)
 - [ADR-0007: первый Ansible-bootstrap запускать прямо на VPS](adr/0007-ansible-bootstrap-on-vps.md)
+- [ADR-0008: production-checkpoint VLESS Reality only](adr/0008-vless-only-production-checkpoint.md)

@@ -84,9 +84,11 @@ systemctl status x-ui --no-pager
 *:443                    xray-linux-amd64
 127.0.0.1:ПОРТ_ПАНЕЛИ     x-ui
 443/tcp ALLOW
-8388/tcp ALLOW
 x-ui active (running)
 ```
+
+Если резервный протокол не входит в текущую production-схему, `8388/tcp` не
+должен слушать и не должен быть открыт в `ufw`.
 
 ## Проверка до переключения клиентов
 
@@ -94,15 +96,16 @@ x-ui active (running)
 
 ```powershell
 Test-NetConnection NEW_SERVER_IP -Port 443
-Test-NetConnection NEW_SERVER_IP -Port 8388
 ```
 
 Временно импортируй тестовый профиль с `NEW_SERVER_IP` и проверь:
 
 - VLESS Reality подключается;
-- Shadowsocks подключается;
 - в панели растёт трафик у правильного inbound;
 - панель 3x-ui не открывается напрямую снаружи.
+
+Резервный протокол проверяй отдельно, только если он уже выбран и входит в
+актуальную production-схему.
 
 ## Переключение DNS
 

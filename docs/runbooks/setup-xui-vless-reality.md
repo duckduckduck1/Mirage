@@ -26,7 +26,6 @@ kbdinteractiveauthentication no
 pubkeyauthentication yes
 22/tcp ALLOW
 443/tcp ALLOW
-8388/tcp ALLOW
 ```
 
 Проверь, что порт `443` ещё свободен:
@@ -91,7 +90,6 @@ sudo ufw status
 ```text
 22/tcp ALLOW
 443/tcp ALLOW
-8388/tcp ALLOW
 ```
 
 С локальной машины открой SSH-туннель:
@@ -279,7 +277,7 @@ sudo journalctl -u x-ui -f
 - Веб-панель слушает только `127.0.0.1:ПОРТ_ПАНЕЛИ`.
 - Доступ к панели идёт через SSH-туннель на `localhost:2096`.
 - Xray слушает публичный `443/tcp`.
-- `ufw` открывает `22/tcp`, `443/tcp`, `8388/tcp`, но не открывает порт панели.
+- `ufw` открывает `22/tcp` и `443/tcp`, но не открывает порт панели.
 - Создан inbound `VLESS + TCP + Reality + Vision`.
 - В Hiddify импортирован одиночный `vless://` профиль, подключение проверено
   реальным трафиком.
