@@ -120,6 +120,10 @@ Playbook создаёт drop-in файл
 `/etc/ssh/sshd_config.d/01-mirage-hardening.conf`, проверяет `sshd -t`, делает
 `reload` SSH и запускает rollback-таймер на 5 минут.
 
+Файл начинается с `01-`, чтобы SSH прочитал его раньше cloud-init drop-in
+`50-cloud-init.conf`. Это важно на Ubuntu-образах, где cloud-init может включать
+`PasswordAuthentication yes`.
+
 Сразу открой новую SSH-сессию:
 
 ```bash

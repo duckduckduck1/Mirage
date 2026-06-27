@@ -11,7 +11,9 @@
 - выдаёт пользователю `mirage` sudo-доступ для автоматизации;
 - ставит базовые пакеты, `ufw` и `fail2ban`;
 - открывает порты `22/tcp`, `443/tcp`, `8388/tcp`;
-- включает SSH-hardening только при явном `enable_ssh_hardening=true`.
+- включает SSH-hardening только при явном `enable_ssh_hardening=true`;
+- кладёт SSH-hardening в `01-mirage-hardening.conf`, чтобы настройки применились
+  раньше cloud-init.
 
 ## Быстрый запуск
 
@@ -21,6 +23,13 @@
 mkdir -p /root/.ssh
 nano /root/.ssh/mirage_ed25519.pub
 chmod 600 /root/.ssh/mirage_ed25519.pub
+```
+
+Установи Ansible и Git, если они ещё не установлены:
+
+```bash
+apt update
+apt install -y ansible git
 ```
 
 Затем запусти bootstrap:
