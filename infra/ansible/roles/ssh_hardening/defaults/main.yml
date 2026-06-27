@@ -1,7 +1,8 @@
 ---
 enable_ssh_hardening: false
 
-ssh_hardening_config_path: /etc/ssh/sshd_config.d/99-mirage-hardening.conf
+ssh_hardening_config_path: /etc/ssh/sshd_config.d/01-mirage-hardening.conf
+ssh_legacy_hardening_config_path: /etc/ssh/sshd_config.d/99-mirage-hardening.conf
 ssh_permit_root_login: prohibit-password
 
 ssh_rollback_script_path: /usr/local/sbin/mirage-ssh-rollback.sh

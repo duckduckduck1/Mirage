@@ -117,7 +117,7 @@ ansible-playbook site.yml -e enable_ssh_hardening=true --tags hardening
 ```
 
 Playbook создаёт drop-in файл
-`/etc/ssh/sshd_config.d/99-mirage-hardening.conf`, проверяет `sshd -t`, делает
+`/etc/ssh/sshd_config.d/01-mirage-hardening.conf`, проверяет `sshd -t`, делает
 `reload` SSH и запускает rollback-таймер на 5 минут.
 
 Сразу открой новую SSH-сессию:

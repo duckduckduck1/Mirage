@@ -4,6 +4,9 @@ set -eu
 CONFIG="{{ ssh_hardening_config_path }}"
 BACKUP="{{ ssh_hardening_backup_file }}"
 PREEXISTING="{{ 'yes' if ssh_hardening_config_stat.stat.exists else 'no' }}"
+LEGACY_CONFIG="{{ ssh_legacy_hardening_config_path }}"
+LEGACY_BACKUP="{{ ssh_legacy_hardening_backup_file }}"
+LEGACY_PREEXISTING="{{ 'yes' if ssh_legacy_hardening_config_stat.stat.exists else 'no' }}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
 if [ -f "$CONFIG" ]; then
@@ -14,6 +17,16 @@ if [ "$PREEXISTING" = "yes" ] && [ -f "$BACKUP" ]; then
   cp "$BACKUP" "$CONFIG"
 else
   rm -f "$CONFIG"
+fi
+
+if [ -f "$LEGACY_CONFIG" ]; then
+  cp "$LEGACY_CONFIG" "$LEGACY_CONFIG.rollback-disabled-$STAMP"
+fi
+
+if [ "$LEGACY_PREEXISTING" = "yes" ] && [ -f "$LEGACY_BACKUP" ]; then
+  cp "$LEGACY_BACKUP" "$LEGACY_CONFIG"
+else
+  rm -f "$LEGACY_CONFIG"
 fi
 
 if /usr/sbin/sshd -t; then
