@@ -45,9 +45,15 @@
     path: "{{ ssh_hardening_config_path }}"
   register: ssh_hardening_config_stat
 
+- name: Check legacy Mirage hardening config
+  ansible.builtin.stat:
+    path: "{{ ssh_legacy_hardening_config_path }}"
+  register: ssh_legacy_hardening_config_stat
+
 - name: Set SSH rollback backup path
   ansible.builtin.set_fact:
-    ssh_hardening_backup_file: "{{ mirage_backup_dir }}/99-mirage-hardening.conf.before"
+    ssh_hardening_backup_file: "{{ mirage_backup_dir }}/01-mirage-hardening.conf.before"
+    ssh_legacy_hardening_backup_file: "{{ mirage_backup_dir }}/99-mirage-hardening.conf.before"
 
 - name: Backup existing Mirage hardening config
   ansible.builtin.copy:
@@ -58,6 +64,16 @@
     group: root
     mode: "0600"
   when: ssh_hardening_config_stat.stat.exists
+
+- name: Backup legacy Mirage hardening config
+  ansible.builtin.copy:
+    src: "{{ ssh_legacy_hardening_config_path }}"
+    dest: "{{ ssh_legacy_hardening_backup_file }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0600"
+  when: ssh_legacy_hardening_config_stat.stat.exists
 
 - name: Install SSH rollback script
   ansible.builtin.template:
@@ -92,11 +108,16 @@
 
 - name: Install Mirage SSH hardening drop-in
   ansible.builtin.template:
-    src: 99-mirage-hardening.conf.j2
+    src: 01-mirage-hardening.conf.j2
     dest: "{{ ssh_hardening_config_path }}"
     owner: root
     group: root
     mode: "0644"
+
+- name: Remove legacy Mirage SSH hardening drop-in
+  ansible.builtin.file:
+    path: "{{ ssh_legacy_hardening_config_path }}"
+    state: absent
 
 - name: Validate SSH configuration
   ansible.builtin.command:
