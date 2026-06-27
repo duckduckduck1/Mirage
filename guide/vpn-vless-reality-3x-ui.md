@@ -4,7 +4,7 @@
 >
 > **Цель не "получить VPN", а ПОНЯТЬ, что и почему ты делаешь.** На выходе: рабочий VPN + Telegram-прокси, понимание сетей, готовый пункт в резюме и темы для собеседования.
 >
-> **Стек проекта:** Ubuntu/Debian VPS · Xray-core (VLESS + Reality + XTLS-Vision) · панель 3x-ui · Shadowsocks-2022 (резерв) · mtg (MTProto FakeTLS) · ufw · Docker · systemd. Дальше — Terraform, Ansible, Prometheus/Grafana (см. Часть III).
+> **Стек проекта:** Ubuntu/Debian VPS · Ansible-bootstrap · Xray-core (VLESS + Reality + XTLS-Vision) · панель 3x-ui · Shadowsocks-2022 (резерв) · mtg (MTProto FakeTLS) · ufw · Docker · systemd. Дальше — Terraform, расширение Ansible, Prometheus/Grafana (см. Часть III).
 
 ---
 
@@ -110,22 +110,66 @@ ssh root@SERVER_IP
 ```
 > 💡 **Чему учит:** что такое публичный IP и зачем он нужен; SSH как защищённый удалённый доступ к серверу (хлеб DevOps). Концепция: клиент–сервер, L3-адресация.
 
-## Шаг 1. Базовая защита сервера
+## Шаг 1. Ansible-bootstrap и базовая защита сервера
+Первый этап больше не делаем набором ручных команд. Его кодифицирует Ansible:
+playbook создаёт пользователя `mirage`, добавляет SSH-ключ, включает `ufw`,
+ставит `fail2ban`, бэкапит административные файлы и только после проверки ключа
+отключает парольный вход.
+
+Почему так безопаснее: SSH-hardening легко сделать слишком рано и потерять доступ
+к серверу. Playbook делит работу на два этапа: сначала новый вход по ключу, потом
+отключение пароля с rollback-таймером.
+
+Полный порядок действий — в [runbook для Ansible-bootstrap](../docs/runbooks/bootstrap-vps-ansible.md).
+Короткий маршрут на сервере:
+
 ```bash
-apt update && apt upgrade -y                 # свежие пакеты и патчи безопасности
-apt install curl socat ufw fail2ban -y       # зависимости + фаервол + защита от брутфорса
-ufw allow 22/tcp                              # SSH
-ufw allow 443/tcp                             # основной VLESS+Reality
-ufw allow 8388/tcp                            # запасной Shadowsocks (порт можно свой)
-ufw enable
+apt update
+apt install -y ansible git
+git clone --branch dev https://github.com/duckduckduck1/Mirage.git /root/mirage
+cd /root/mirage/infra/ansible
+ansible-playbook --syntax-check site.yml
+ansible-playbook site.yml
 ```
+
+После первого запуска проверь новый вход с локальной машины:
+
+```bash
+ssh -i ~/.ssh/mirage_ed25519 mirage@SERVER_IP
+```
+
+Затем включи SSH-hardening:
+
+```bash
+ansible-playbook site.yml -e enable_ssh_hardening=true --tags hardening
+```
+
+Контрольные проверки на сервере:
+
+```bash
+sudo -n true
+sudo ufw status
+sudo /usr/sbin/sshd -T | grep -E 'passwordauthentication|kbdinteractiveauthentication|permitrootlogin|pubkeyauthentication'
+```
+
+Ожидаемый результат: `passwordauthentication no`, `pubkeyauthentication yes`,
+`ufw` активен, а порты `22/tcp`, `443/tcp`, `8388/tcp` открыты.
 Порт веб-панели добавим после установки (он будет случайным).
-> 💡 **Чему учит:** **firewall** как фильтр "по портам" (принцип: разрешено только нужное — least privilege); **fail2ban** банит тех, кто перебирает пароли по SSH. Концепция: L4/порты, защита периметра.
+
+> 💡 **Чему учит:** управлению конфигурацией, идемпотентности и безопасному
+> hardening. Ты не просто вводишь команды, а описываешь желаемое состояние сервера
+> и проверяешь его диагностикой.
+
+Вопросы для самопроверки:
+
+- Почему парольный вход отключаем только после проверки входа по ключу?
+- Зачем playbook делает бэкап `/etc/ssh`, `/etc/sudoers*` и `/etc/ufw` перед изменениями?
 
 ## Шаг 2. Установка панели 3x-ui
 3x-ui — веб-морда над Xray-core: пользователи, лимиты, QR-коды, статистика.
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh)
+curl -Ls https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh -o /tmp/3x-ui-install.sh
+sudo bash /tmp/3x-ui-install.sh
 ```
 Во время установки скрипт спросит:
 - **Установить?** → `y`
@@ -135,11 +179,11 @@ bash <(curl -Ls https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.
 
 Открой панель: `http://SERVER_IP:ПОРТ_ПАНЕЛИ/секретный_путь` (точный адрес скрипт покажет в конце). Добавь порт в фаервол:
 ```bash
-ufw allow ПОРТ_ПАНЕЛИ/tcp
+sudo ufw allow ПОРТ_ПАНЕЛИ/tcp
 ```
 **Защита панели (обязательно):** случайный порт + секретный путь (`webBasePath`), сильные креды, включи **2FA**. В идеале не светить панель наружу, а ходить через SSH-туннель:
 ```bash
-ssh -L 2096:localhost:ПОРТ_ПАНЕЛИ root@SERVER_IP   # потом открыть http://localhost:2096/...
+ssh -L 2096:localhost:ПОРТ_ПАНЕЛИ mirage@SERVER_IP   # потом открыть http://localhost:2096/...
 ```
 Управление из консоли — команда `x-ui` (меню: рестарт, сброс пароля, смена порта).
 > 💡 **Чему учит:** установка и запуск сервиса; **SSH-туннель** (`-L`) — мощная концепция проброса портов через шифрованный канал; почему нестандартный порт + 2FA = меньше поверхность атаки.
@@ -292,7 +336,7 @@ docker exec mtg-proxy /mtg access /config.toml
 Базовый проект уже хорош. Эти расширения превращают его в сильный кейс DevOps/SRE. Делай по одному — каждое даёт отдельную тему для собеседования.
 
 1. **Infrastructure as Code — Terraform.** Описать сам VPS кодом: провайдер, регион, размер, firewall-правила. `terraform apply` поднимает сервер с нуля. → *"Провижининг инфраструктуры через Terraform, декларативное описание ресурсов"*.
-2. **Configuration Management — Ansible.** Плейбук, который ставит и настраивает 3x-ui, mtg, ufw, fail2ban — идемпотентно и воспроизводимо. → *"Автоматизация конфигурации серверов через Ansible, идемпотентные плейбуки"*.
+2. **Configuration Management — Ansible.** Расширить текущий bootstrap playbook: добавить установку и настройку 3x-ui, mtg, `ufw`, `fail2ban` — идемпотентно и воспроизводимо. → *"Автоматизация конфигурации серверов через Ansible, идемпотентные плейбуки"*.
 3. **Docker Compose.** Собрать весь стек (3x-ui + mtg + мониторинг) в один `docker-compose.yml`. → *"Оркестрация многоконтейнерных приложений через Docker Compose"*.
 4. **Observability — Prometheus + Grafana.** mtg отдаёт метрики Prometheus из коробки; добавь `node_exporter` для метрик хоста (CPU, сеть, диск) и собери дашборд в Grafana. → *"Сбор метрик (Prometheus), визуализация (Grafana), мониторинг сетевого сервиса"*.
 5. **Алертинг — Alertmanager.** Уведомление в тот же Telegram, если прокси упал, кончилось место или скакнул трафик. → *"Настройка алертов, проактивный мониторинг (SRE)"*.
@@ -354,4 +398,9 @@ ufw status               # правила фаервола
 ---
 
 ## Краткий маршрут
-VPS (Германия/Финляндия, 1GB RAM) → защита сервера + ufw → `install.sh` 3x-ui → защитить панель → inbound VLESS+Reality+Vision на 443 → клиенты-друзья → запасной Shadowsocks → MTProxy (mtg, FakeTLS под vk.ru) на 8443 → раздать QR/подписки → клиент Hiddify/v2rayNG. Затем Часть III: Terraform → Ansible → Prometheus/Grafana.
+VPS (Германия/Финляндия, 1 ГБ RAM) → Ansible-bootstrap (`mirage`, SSH-ключ,
+`ufw`, `fail2ban`, SSH-hardening) → `install.sh` 3x-ui → защитить панель →
+inbound VLESS+Reality+Vision на 443 → клиенты-друзья → запасной Shadowsocks →
+MTProxy (mtg, FakeTLS под vk.ru) на 8443 → раздать QR/подписки → клиент
+Hiddify/v2rayNG. Затем Часть III: Terraform → Ansible для сервисов →
+Prometheus/Grafana.
