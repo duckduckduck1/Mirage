@@ -3,9 +3,10 @@
 > Самостоятельно развёрнутый VPN + Telegram-прокси с маскировкой трафика и
 > упором на **быструю миграцию между серверами без потерь для пользователей**.
 
-**Статус:** 🚧 в разработке. Первый инфраструктурный этап готов: безопасный
-Ansible-bootstrap VPS с SSH-доступом по ключу, пользователем `mirage`, `ufw` и
-`fail2ban`. Следующий этап — установка 3x-ui/Xray и VPN-inbound'ов.
+**Статус:** 🚧 в разработке. Готовы два первых этапа: безопасный
+Ansible-bootstrap VPS и ручная настройка 3x-ui/Xray с VLESS Reality на `443/tcp`.
+Панель 3x-ui закрыта за SSH-туннелем. Следующие этапы — Shadowsocks-2022,
+Telegram-прокси `mtg`, бэкапы и автоматизация сервисов через Ansible.
 
 ## Что это
 
@@ -26,9 +27,9 @@ Mirage — это связка из двух сервисов на арендо�
 - раздаём только **subscription-ссылки** (единый источник правды), а не голые
   конфиги — при переезде правится только сервер, клиенты подхватывают новое сами;
 - адрес подписки привязан к **домену**, а не к IP;
-- базовый доступ и защита сервера уже кодифицированы в **Ansible**; Terraform
-  отложен до провайдера с API;
-- БД панели и конфиги — в бэкапе.
+- базовый доступ и защита сервера уже кодифицированы в **Ansible**; установка
+  3x-ui/Xray пока зафиксирована runbook'ом и будет автоматизироваться позже;
+- БД панели и конфиги должны попадать в регулярный бэкап.
 
 Подробнее — в [документации по архитектуре](docs/architecture.md).
 
@@ -39,7 +40,7 @@ Mirage — это связка из двух сервисов на арендо�
 | Сервер | Ubuntu/Debian VPS, `systemd`, `ufw`, `fail2ban` |
 | VPN | Xray-core (VLESS + Reality + Vision), панель 3x-ui, Shadowsocks-2022 (резерв) |
 | Telegram | `mtg` (MTProto FakeTLS) в Docker |
-| Инфраструктура | Ansible-bootstrap (готово), Terraform и Docker Compose (план) |
+| Инфраструктура | Ansible-bootstrap (готово), 3x-ui runbook (готово), Terraform и Docker Compose (план) |
 | Наблюдаемость (план) | Prometheus, Grafana, Alertmanager |
 
 ## Структура репозитория
@@ -66,6 +67,7 @@ Mirage — это связка из двух сервисов на арендо�
 - [Стиль документации](docs/style-guide.md)
 - [Журнал архитектурных решений (ADR)](docs/adr/)
 - [Runbook: bootstrap VPS через Ansible](docs/runbooks/bootstrap-vps-ansible.md)
+- [Runbook: ручная настройка 3x-ui и VLESS Reality](docs/runbooks/setup-xui-vless-reality.md)
 - [Учебный гайд по сборке](guide/vpn-vless-reality-3x-ui.md)
 
 ## Лицензия
