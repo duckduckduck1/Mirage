@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+CONFIG="{{ ssh_hardening_config_path }}"
+BACKUP="{{ ssh_hardening_backup_file }}"
+PREEXISTING="{{ 'yes' if ssh_hardening_config_stat.stat.exists else 'no' }}"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+
+if [ -f "$CONFIG" ]; then
+  cp "$CONFIG" "$CONFIG.rollback-disabled-$STAMP"
+fi
+
+if [ "$PREEXISTING" = "yes" ] && [ -f "$BACKUP" ]; then
+  cp "$BACKUP" "$CONFIG"
+else
+  rm -f "$CONFIG"
+fi
+
+if /usr/sbin/sshd -t; then
+  systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+fi

@@ -1,0 +1,43 @@
+---
+- name: Install base security packages
+  ansible.builtin.apt:
+    name: "{{ base_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable fail2ban
+  ansible.builtin.service:
+    name: fail2ban
+    state: started
+    enabled: true
+  when: enable_fail2ban | bool
+
+- name: Set ufw default incoming policy
+  ansible.builtin.command:
+    cmd: ufw default deny incoming
+  register: ufw_default_incoming
+  changed_when: "'Default incoming policy changed' in ufw_default_incoming.stdout"
+  when: enable_ufw | bool
+
+- name: Set ufw default outgoing policy
+  ansible.builtin.command:
+    cmd: ufw default allow outgoing
+  register: ufw_default_outgoing
+  changed_when: "'Default outgoing policy changed' in ufw_default_outgoing.stdout"
+  when: enable_ufw | bool
+
+- name: Allow required TCP ports before enabling ufw
+  ansible.builtin.command:
+    cmd: "ufw allow {{ item }}/tcp"
+  loop: "{{ allowed_tcp_ports }}"
+  register: ufw_allow_ports
+  changed_when: "'Rules updated' in ufw_allow_ports.stdout"
+  when: enable_ufw | bool
+
+- name: Enable ufw
+  ansible.builtin.command:
+    cmd: ufw --force enable
+  register: ufw_enable
+  changed_when: "'Firewall is active and enabled' in ufw_enable.stdout"
+  when: enable_ufw | bool

@@ -1,0 +1,42 @@
+---
+- name: Bootstrap Mirage VPS locally
+  hosts: mirage_vps
+  gather_facts: true
+
+  pre_tasks:
+    - name: Confirm that playbook runs from a root session
+      ansible.builtin.assert:
+        that:
+          - ansible_user_id == "root"
+        fail_msg: >-
+          Run this first bootstrap from the temporary root session on the VPS.
+          The playbook creates the non-root admin user after backups are in place.
+      tags:
+        - always
+
+    - name: Confirm that bootstrap runs locally on the VPS
+      ansible.builtin.assert:
+        that:
+          - ansible_connection == "local"
+        fail_msg: >-
+          This playbook is designed for the first bootstrap directly on the VPS.
+          Use inventory/localhost.yml or change the playbook deliberately.
+      tags:
+        - always
+
+  roles:
+    - role: bootstrap_access
+      tags:
+        - bootstrap
+        - access
+
+    - role: base_security
+      tags:
+        - bootstrap
+        - security
+
+    - role: ssh_hardening
+      when: enable_ssh_hardening | bool
+      tags:
+        - hardening
+        - ssh

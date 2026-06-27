@@ -1,0 +1,13 @@
+# Copy this file to group_vars/all.yml on the VPS if you want to override defaults.
+# Do not commit group_vars/all.yml if it contains host-specific values.
+
+admin_user: mirage
+admin_public_key_file: /root/.ssh/mirage_ed25519.pub
+
+allowed_tcp_ports:
+  - 22
+  - 443
+  - 8388
+
+# Keep false for the first run. Enable only after the admin key login works.
+enable_ssh_hardening: false
