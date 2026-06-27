@@ -3,10 +3,11 @@
 > Самостоятельно управляемый VPN + Telegram-прокси с маскировкой трафика,
 > подписками и быстрым переносом между VPS.
 
-**Статус:** 🚧 активная разработка. Готовы безопасный Ansible-bootstrap VPS и
-ручная настройка 3x-ui/Xray с VLESS Reality на `443/tcp`. Панель 3x-ui закрыта
-за SSH-туннелем. Следующие этапы — Shadowsocks-2022, Telegram-прокси `mtg`,
-бэкапы, домен для подписок и автоматизация сервисов через Ansible.
+**Статус:** 🚧 активная разработка. Готовы безопасный Ansible-bootstrap VPS,
+ручная настройка 3x-ui/Xray с VLESS Reality на `443/tcp`, схема домена для
+клиентских ссылок и runbook первого бэкапа. Панель 3x-ui закрыта за
+SSH-туннелем. Следующие этапы — Shadowsocks-2022, публичные subscription-ссылки,
+Telegram-прокси `mtg` и автоматизация сервисов через Ansible.
 
 ## Что это
 
@@ -71,6 +72,8 @@ VPS:
 - [Журнал архитектурных решений (ADR)](docs/adr/)
 - [Runbook: bootstrap VPS через Ansible](docs/runbooks/bootstrap-vps-ansible.md)
 - [Runbook: ручная настройка 3x-ui и VLESS Reality](docs/runbooks/setup-xui-vless-reality.md)
+- [Runbook: домен и subscription-ссылки](docs/runbooks/domain-and-subscriptions.md)
+- [Runbook: бэкап 3x-ui](docs/runbooks/backup-xui.md)
 - [Runbook: миграция на новый VPS](docs/runbooks/migrate-vps.md)
 
 ## Лицензия
