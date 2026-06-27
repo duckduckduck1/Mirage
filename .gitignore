@@ -8,6 +8,13 @@
 secrets/
 config.toml              # mtg: содержит FakeTLS-секрет, генерится на сервере
 mtg/config.toml
+backups/
+exports/
+*.backup
+*.dump
+*.db
+*.sqlite
+*.sqlite3
 !*.example
 
 # === Terraform ===
