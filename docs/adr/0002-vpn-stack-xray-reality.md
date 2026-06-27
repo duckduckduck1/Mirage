@@ -1,6 +1,6 @@
 # 2. Стек VPN: Xray (VLESS + Reality + Vision), Shadowsocks как резерв
 
-- **Статус:** принято
+- **Статус:** заменено [ADR-0008](0008-vless-only-production-checkpoint.md)
 - **Дата:** 2026-06-25
 
 ## Контекст

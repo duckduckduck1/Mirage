@@ -9,6 +9,8 @@ base_packages:
 allowed_tcp_ports:
   - 22
   - 443
+
+revoked_tcp_ports:
   - 8388
 
 enable_ufw: true

@@ -30,9 +30,18 @@
 - name: Allow required TCP ports before enabling ufw
   ansible.builtin.command:
     cmd: "ufw allow {{ item }}/tcp"
-  loop: "{{ allowed_tcp_ports }}"
+  loop: "{{ allowed_tcp_ports | default([]) }}"
   register: ufw_allow_ports
   changed_when: "'Rules updated' in ufw_allow_ports.stdout"
+  when: enable_ufw | bool
+
+- name: Revoke unused TCP ports before enabling ufw
+  ansible.builtin.command:
+    cmd: "ufw delete allow {{ item }}/tcp"
+  loop: "{{ revoked_tcp_ports | default([]) }}"
+  register: ufw_revoke_ports
+  changed_when: "'Rule deleted' in ufw_revoke_ports.stdout"
+  failed_when: false
   when: enable_ufw | bool
 
 - name: Enable ufw

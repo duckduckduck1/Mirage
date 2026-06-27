@@ -3,12 +3,12 @@
 > Самостоятельно управляемый VPN + Telegram-прокси с маскировкой трафика,
 > подписками и быстрым переносом между VPS.
 
-**Статус:** 🚧 активная разработка. Готовы безопасный Ansible-bootstrap VPS,
-ручная настройка 3x-ui/Xray с VLESS Reality на `443/tcp`, runbook первого
-бэкапа, схема домена для клиентских ссылок и инструкция для резервного
-Shadowsocks-2022. Панель 3x-ui закрыта за SSH-туннелем. Следующие этапы —
-проверка Shadowsocks на VPS, публичные subscription-ссылки, Telegram-прокси
-`mtg` и автоматизация сервисов через Ansible.
+**Статус:** 🚧 активная разработка. Готов production-checkpoint: безопасный
+Ansible-bootstrap VPS, 3x-ui/Xray с VLESS Reality на `443/tcp`, закрытая за
+SSH-туннелем панель, ротированный VLESS-клиент, сменённый пароль панели и
+backup-процедура. Публично открыты только `22/tcp` и `443/tcp`. Следующие этапы —
+домен и subscription-ссылки, выбор резервного протокола, Telegram-прокси `mtg` и
+автоматизация сервисов через Ansible.
 
 ## Что это
 
@@ -21,7 +21,8 @@ VPS:
 - **Telegram-прокси** — `mtg` (MTProto, режим FakeTLS) с маскировкой под
   выбранный разрешённый домен.
 
-В резерве — Shadowsocks-2022 на случай блокировки основного протокола.
+Резервный протокол выбирается отдельным этапом. Shadowsocks-2022 описан как
+диагностический вариант, но не входит в текущую production-схему.
 
 ## Ключевая идея: IP как расходник
 
@@ -42,7 +43,7 @@ VPS:
 | Слой | Технологии |
 |---|---|
 | Сервер | Ubuntu/Debian VPS, `systemd`, `ufw`, `fail2ban` |
-| VPN | Xray-core (VLESS + Reality + Vision), панель 3x-ui, Shadowsocks-2022 (резерв) |
+| VPN | Xray-core (VLESS + Reality + Vision), панель 3x-ui |
 | Telegram | `mtg` (MTProto FakeTLS) в Docker |
 | Инфраструктура | Ansible-bootstrap (готово), 3x-ui runbook (готово), Terraform и Docker Compose (план) |
 | Наблюдаемость (план) | Prometheus, Grafana, Alertmanager |
@@ -73,7 +74,8 @@ VPS:
 - [Журнал архитектурных решений (ADR)](docs/adr/)
 - [Runbook: bootstrap VPS через Ansible](docs/runbooks/bootstrap-vps-ansible.md)
 - [Runbook: ручная настройка 3x-ui и VLESS Reality](docs/runbooks/setup-xui-vless-reality.md)
-- [Runbook: резервный Shadowsocks-2022](docs/runbooks/setup-shadowsocks-2022.md)
+- [Runbook: production-checkpoint VLESS Reality](docs/runbooks/vless-production-checkpoint.md)
+- [Runbook: проверка Shadowsocks-2022](docs/runbooks/setup-shadowsocks-2022.md)
 - [Runbook: домен и subscription-ссылки](docs/runbooks/domain-and-subscriptions.md)
 - [Runbook: бэкап 3x-ui](docs/runbooks/backup-xui.md)
 - [Runbook: миграция на новый VPS](docs/runbooks/migrate-vps.md)
