@@ -50,7 +50,10 @@ Mirage — это связка из двух сервисов на арендо�
 ├── docs/
 │   ├── architecture.md  — архитектура и дизайн миграции
 │   ├── style-guide.md   — стиль документации (на базе Google dev docs style)
-│   └── adr/             — Architecture Decision Records (журнал решений)
+│   ├── adr/             — Architecture Decision Records (журнал решений)
+│   └── runbooks/        — эксплуатационные инструкции
+├── infra/
+│   └── ansible/         — первый bootstrap VPS и базовая защита
 ├── guide/               — учебный гайд по сборке (теория + пошаговая практика)
 └── .github/             — шаблоны PR и задач
 ```
@@ -61,6 +64,7 @@ Mirage — это связка из двух сервисов на арендо�
 - [Как контрибьютить (ветки, коммиты, PR)](CONTRIBUTING.md)
 - [Стиль документации](docs/style-guide.md)
 - [Журнал архитектурных решений (ADR)](docs/adr/)
+- [Runbook: bootstrap VPS через Ansible](docs/runbooks/bootstrap-vps-ansible.md)
 - [Учебный гайд по сборке](guide/vpn-vless-reality-3x-ui.md)
 
 ## Лицензия

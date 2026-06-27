@@ -103,12 +103,13 @@
 
 Подход пересмотрен (ADR-0006): у выбранного reseller-VPS нет API, поэтому
 **Terraform отложен** до будущих версий. **Ansible остаётся** ближайшей целью — он
-настраивает сервер по SSH без API. Порядок: сначала ручная настройка (понять
-каждый шаг), затем кодификация в Ansible.
+настраивает сервер по SSH без API. Первый bootstrap запускается прямо на VPS
+через локальный inventory (ADR-0007), чтобы безопасно перейти от root-пароля к
+администратору по SSH-ключу.
 
 ```
 infra/
-└── ansible/        — установка Xray/3x-ui, mtg, ufw, fail2ban; идемпотентно
+└── ansible/        — bootstrap доступа, ufw, fail2ban; позже Xray/3x-ui и mtg
                       (terraform/ — позже, при переезде на провайдера с API)
 ```
 
@@ -170,3 +171,4 @@ flowchart LR
 - [ADR-0004: инфраструктура как код с самого начала](adr/0004-iac-from-the-start.md)
 - [ADR-0005: провайдер VPS — Timeweb Cloud](adr/0005-vps-provider-timeweb.md) (заменён)
 - [ADR-0006: ручной provisioning, Terraform отложен](adr/0006-manual-provisioning-defer-terraform.md)
+- [ADR-0007: первый Ansible-bootstrap запускать прямо на VPS](adr/0007-ansible-bootstrap-on-vps.md)

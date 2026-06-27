@@ -1,0 +1,116 @@
+---
+- name: Set backup directory for hardening run
+  ansible.builtin.set_fact:
+    mirage_backup_id: "{{ ansible_date_time.iso8601_basic_short }}"
+    mirage_backup_dir: "{{ mirage_backup_root }}/{{ ansible_date_time.iso8601_basic_short }}"
+  when: mirage_backup_dir is not defined
+
+- name: Create backup directory
+  ansible.builtin.file:
+    path: "{{ mirage_backup_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Ensure sshd drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Confirm sshd_config loads drop-in files
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -E
+      - "^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config.d/\\*.conf"
+      - /etc/ssh/sshd_config
+  register: sshd_include_check
+  changed_when: false
+  failed_when: false
+
+- name: Stop if sshd drop-in files are not included
+  ansible.builtin.assert:
+    that:
+      - sshd_include_check.rc == 0
+    fail_msg: >-
+      /etc/ssh/sshd_config does not include /etc/ssh/sshd_config.d/*.conf.
+      Refusing to edit the main SSH config automatically.
+
+- name: Check existing Mirage hardening config
+  ansible.builtin.stat:
+    path: "{{ ssh_hardening_config_path }}"
+  register: ssh_hardening_config_stat
+
+- name: Set SSH rollback backup path
+  ansible.builtin.set_fact:
+    ssh_hardening_backup_file: "{{ mirage_backup_dir }}/99-mirage-hardening.conf.before"
+
+- name: Backup existing Mirage hardening config
+  ansible.builtin.copy:
+    src: "{{ ssh_hardening_config_path }}"
+    dest: "{{ ssh_hardening_backup_file }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0600"
+  when: ssh_hardening_config_stat.stat.exists
+
+- name: Install SSH rollback script
+  ansible.builtin.template:
+    src: mirage-ssh-rollback.sh.j2
+    dest: "{{ ssh_rollback_script_path }}"
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Stop previous SSH rollback timer if present
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - stop
+      - "{{ ssh_rollback_unit_name }}.timer"
+      - "{{ ssh_rollback_unit_name }}.service"
+  register: stop_rollback_timer
+  changed_when: false
+  failed_when: false
+  when: ssh_rollback_enabled | bool
+
+- name: Schedule SSH rollback timer
+  ansible.builtin.command:
+    argv:
+      - systemd-run
+      - "--unit={{ ssh_rollback_unit_name }}"
+      - "--on-active={{ ssh_rollback_delay }}"
+      - --collect
+      - "{{ ssh_rollback_script_path }}"
+  changed_when: true
+  when: ssh_rollback_enabled | bool
+
+- name: Install Mirage SSH hardening drop-in
+  ansible.builtin.template:
+    src: 99-mirage-hardening.conf.j2
+    dest: "{{ ssh_hardening_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Validate SSH configuration
+  ansible.builtin.command:
+    cmd: /usr/sbin/sshd -t
+  changed_when: false
+
+- name: Reload SSH service
+  block:
+    - name: Reload ssh
+      ansible.builtin.service:
+        name: ssh
+        state: reloaded
+  rescue:
+    - name: Reload sshd
+      ansible.builtin.service:
+        name: sshd
+        state: reloaded

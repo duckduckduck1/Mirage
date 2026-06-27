@@ -24,6 +24,11 @@ crash.log
 vault-password*
 .vault_pass*
 *.vault
+infra/ansible/group_vars/*.yml
+!infra/ansible/group_vars/*.example.yml
+infra/ansible/host_vars/
+infra/ansible/inventory/*.local.*
+infra/ansible/*.log
 
 # === Логи и временное ===
 *.log

@@ -1,0 +1,124 @@
+---
+- name: Require Debian or Ubuntu target
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+    fail_msg: "This bootstrap is written for fresh Ubuntu/Debian VPS hosts."
+
+- name: Set backup directory for this run
+  ansible.builtin.set_fact:
+    mirage_backup_id: "{{ ansible_date_time.iso8601_basic_short }}"
+    mirage_backup_dir: "{{ mirage_backup_root }}/{{ ansible_date_time.iso8601_basic_short }}"
+  when: mirage_backup_dir is not defined
+
+- name: Create backup directory
+  ansible.builtin.file:
+    path: "{{ mirage_backup_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Check administrative paths before changes
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ mirage_backup_paths }}"
+  register: mirage_backup_path_stats
+
+- name: Build list of existing administrative paths
+  ansible.builtin.set_fact:
+    mirage_existing_backup_paths: "{{ mirage_backup_path_stats.results | selectattr('stat.exists') | map(attribute='item') | list }}"
+
+- name: Archive existing administrative files
+  ansible.builtin.command:
+    cmd: >-
+      tar -czf {{ mirage_backup_dir }}/admin-files.tar.gz
+      -C /
+      {{ mirage_existing_backup_paths | map('regex_replace', '^/', '') | join(' ') }}
+    creates: "{{ mirage_backup_dir }}/admin-files.tar.gz"
+  when: mirage_existing_backup_paths | length > 0
+  changed_when: true
+
+- name: Write backup manifest
+  ansible.builtin.copy:
+    dest: "{{ mirage_backup_dir }}/manifest.txt"
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      Created by Mirage Ansible bootstrap.
+      Backup id: {{ mirage_backup_id }}
+
+      Archived paths:
+      {% for path in mirage_existing_backup_paths %}
+      - {{ path }}
+      {% endfor %}
+
+- name: Install sudo and OpenSSH server
+  ansible.builtin.apt:
+    name:
+      - sudo
+      - openssh-server
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Resolve admin public key
+  ansible.builtin.set_fact:
+    mirage_admin_public_key_resolved: >-
+      {{
+        (admin_public_key | default('', true) | trim)
+        if (admin_public_key | default('', true) | trim | length > 0)
+        else (lookup('ansible.builtin.file', admin_public_key_file, errors='ignore') | trim)
+      }}
+
+- name: Require admin public key
+  ansible.builtin.assert:
+    that:
+      - mirage_admin_public_key_resolved | length > 0
+      - mirage_admin_public_key_resolved is match('^(ssh-ed25519|ssh-rsa|ecdsa-sha2-|sk-ssh-ed25519|sk-ecdsa-sha2-) ')
+    fail_msg: >-
+      Put the public key on the VPS at {{ admin_public_key_file }},
+      or pass admin_public_key explicitly. Never copy the private key to the VPS.
+
+- name: Create admin primary group
+  ansible.builtin.group:
+    name: "{{ admin_user }}"
+    state: present
+
+- name: Create admin user
+  ansible.builtin.user:
+    name: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    shell: "{{ admin_shell }}"
+    groups: "{{ admin_sudo_group }}"
+    append: true
+    create_home: true
+    state: present
+
+- name: Create admin SSH directory
+  ansible.builtin.file:
+    path: "/home/{{ admin_user }}/.ssh"
+    state: directory
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0700"
+
+- name: Install admin SSH public key
+  ansible.builtin.lineinfile:
+    path: "/home/{{ admin_user }}/.ssh/authorized_keys"
+    line: "{{ mirage_admin_public_key_resolved }}"
+    create: true
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0600"
+
+- name: Allow admin user passwordless sudo for automation
+  ansible.builtin.copy:
+    dest: "{{ admin_sudoers_file }}"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "visudo -cf %s"
+    content: |
+      {{ admin_user }} ALL=(ALL) NOPASSWD:ALL
