@@ -38,6 +38,10 @@ py -3 -m venv .venv
    MIRAGE_SSH_HOST=SERVER_HOST_OR_DOMAIN
    MIRAGE_SSH_USER=mirage
    MIRAGE_SSH_KEY=$HOME\.ssh\mirage_ed25519
+   MIRAGE_XUI_VLESS_PORT=443
+   MIRAGE_XUI_VLESS_REMARK=vless-reality-vision
+   MIRAGE_XUI_REALITY_TARGET=www.microsoft.com:443
+   MIRAGE_XUI_REALITY_SNI=www.microsoft.com
    ```
 
 Если API token ещё не создан, временно задай `MIRAGE_XUI_USERNAME` и
@@ -61,6 +65,13 @@ py -3 ops/xui/xui_api.py inbounds
 
 ```bash
 py -3 ops/xui/xui_api.py access-info
+```
+
+Создать VLESS Reality inbound на `443`, синхронизировать `main`, `partner`,
+`shared` и вывести готовые ссылки:
+
+```bash
+py -3 ops/xui/xui_api.py bootstrap-vpn --print-links
 ```
 
 Создать клиента и вывести готовую ссылку:
@@ -110,6 +121,10 @@ py -3 ops/xui/xui_api.py backup-db
    MIRAGE_SSH_HOST=SERVER_HOST_OR_DOMAIN
    MIRAGE_SSH_USER=mirage
    MIRAGE_SSH_KEY=$HOME\.ssh\mirage_ed25519
+   MIRAGE_XUI_VLESS_PORT=443
+   MIRAGE_XUI_VLESS_REMARK=vless-reality-vision
+   MIRAGE_XUI_REALITY_TARGET=www.microsoft.com:443
+   MIRAGE_XUI_REALITY_SNI=www.microsoft.com
    ```
 
 3. Проверь доступ к панели:
@@ -124,13 +139,20 @@ py -3 ops/xui/xui_api.py backup-db
    docker compose -f ops/xui/compose.yml run --rm xui-ops access-info
    ```
 
-5. Создай клиента и выведи ссылку:
+5. Создай VLESS Reality inbound на `443`, синхронизируй `main`, `partner`,
+   `shared` и выведи готовые ссылки:
+
+   ```bash
+   docker compose -f ops/xui/compose.yml run --rm xui-ops bootstrap-vpn --print-links
+   ```
+
+6. Создай отдельного клиента и выведи ссылку:
 
    ```bash
    docker compose -f ops/xui/compose.yml run --rm xui-ops ensure-client --email CLIENT_EMAIL --print-links
    ```
 
-6. Синхронизируй клиентов:
+7. Синхронизируй клиентов без пересоздания inbound:
 
    ```bash
    docker compose -f ops/xui/compose.yml run --rm xui-ops sync-users --print-links
@@ -140,7 +162,7 @@ py -3 ops/xui/xui_api.py backup-db
    Если нужен другой список, скопируй `ops/xui/users.example.json` в
    `ops/xui/users.local.json` и измени локальный файл.
 
-7. Скачай backup базы в локальную папку `backups/x-ui`:
+8. Скачай backup базы в локальную папку `backups/x-ui`:
 
    ```bash
    mkdir -p backups/x-ui

@@ -50,6 +50,53 @@ class XuiApiTests(unittest.TestCase):
         args = argparse.Namespace(inbound_id=None, inbound_remark=None, protocol=None, port=None)
         self.assertEqual(xui_api.resolve_inbound_ids(args, {}, FakeApi()), [2])
 
+    def test_build_vless_reality_payload_uses_safe_defaults(self):
+        args = argparse.Namespace(
+            vless_port=None,
+            vless_remark=None,
+            vless_listen=None,
+            reality_target=None,
+            reality_sni=None,
+            reality_short_ids="ab,cd12",
+        )
+        payload = xui_api.build_vless_reality_payload(
+            args,
+            {},
+            {"privateKey": "private", "publicKey": "public"},
+        )
+        self.assertEqual(payload["port"], 443)
+        self.assertEqual(payload["protocol"], "vless")
+        self.assertEqual(payload["settings"]["decryption"], "none")
+        self.assertEqual(payload["streamSettings"]["network"], "tcp")
+        self.assertEqual(payload["streamSettings"]["security"], "reality")
+        reality = payload["streamSettings"]["realitySettings"]
+        self.assertEqual(reality["target"], "www.microsoft.com:443")
+        self.assertEqual(reality["serverNames"], ["www.microsoft.com"])
+        self.assertEqual(reality["privateKey"], "private")
+        self.assertEqual(reality["settings"]["publicKey"], "public")
+        self.assertEqual(reality["shortIds"], ["ab", "cd12"])
+
+    def test_ensure_client_attaches_existing_client(self):
+        class FakeApi:
+            def __init__(self):
+                self.attached = None
+
+            def api(self, method, path, data=None, expect_success=True):
+                if path == "/panel/api/inbounds/options":
+                    return {"success": True, "obj": [{"id": 2, "protocol": "vless", "port": 443}]}
+                if path == "/panel/api/clients/get/main":
+                    return {"success": True, "obj": {"client": {"email": "main"}, "inboundIds": []}}
+                if method == "POST" and path == "/panel/api/clients/main/attach":
+                    self.attached = data
+                    return {"success": True}
+                raise AssertionError(path)
+
+        args = argparse.Namespace(email="main", inbound_id=None, inbound_remark=None, protocol=None, port=None)
+        api = FakeApi()
+        result = xui_api.ensure_client(args, {}, api)
+        self.assertTrue(result["changed"])
+        self.assertEqual(api.attached, {"inboundIds": [2]})
+
     def test_choose_users_path_falls_back_to_example(self):
         with tempfile.TemporaryDirectory() as tmp:
             previous_local = xui_api.DEFAULT_USERS_FILE
