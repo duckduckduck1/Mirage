@@ -46,6 +46,8 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+ops/xui/*.local.json
+ops/xui/output/
 
 # === ОС и редакторы ===
 .DS_Store

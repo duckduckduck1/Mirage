@@ -1,0 +1,14 @@
+services:
+  xui-ops:
+    build:
+      context: ../..
+      dockerfile: ops/xui/Dockerfile
+    image: mirage-xui-ops:local
+    network_mode: host
+    user: "${MIRAGE_DOCKER_UID:-1000}:${MIRAGE_DOCKER_GID:-1000}"
+    security_opt:
+      - no-new-privileges:true
+    env_file:
+      - .env.local
+    volumes:
+      - ../../backups:/app/backups

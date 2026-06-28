@@ -1,0 +1,21 @@
+{
+  "base_url": "http://127.0.0.1:2096/WEB_BASE_PATH",
+  "public_host": "SERVER_HOST_OR_DOMAIN",
+  "default_inbound": {
+    "remark": "vless-reality-vision",
+    "protocol": "vless",
+    "port": 443
+  },
+  "default_client": {
+    "flow": "xtls-rprx-vision",
+    "security": "auto",
+    "total_gb": 0,
+    "expiry_time_ms": 0,
+    "limit_ip": 0,
+    "reset_days": 0,
+    "tg_id": 0,
+    "group": "",
+    "comment": "",
+    "enable": true
+  }
+}
