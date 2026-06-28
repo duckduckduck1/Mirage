@@ -1,5 +1,6 @@
 import argparse
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -29,6 +30,37 @@ class XuiApiTests(unittest.TestCase):
         args = argparse.Namespace(public_host=None)
         config = {"public_host": "https://vpn.example.com:8443/panel"}
         self.assertEqual(xui_api.public_host_value(args, config), "vpn.example.com")
+
+    def test_panel_url_parts_keeps_base_path(self):
+        parts = xui_api.panel_url_parts("http://127.0.0.1:31453/s-a0000000")
+        self.assertEqual(parts["port"], 31453)
+        self.assertEqual(parts["path"], "/s-a0000000/")
+
+    def test_resolve_inbound_ids_defaults_to_vless_443(self):
+        class FakeApi:
+            def api(self, _method, _path):
+                return {
+                    "success": True,
+                    "obj": [
+                        {"id": 2, "protocol": "vless", "port": 443, "remark": "vless-reality-vision"},
+                        {"id": 3, "protocol": "shadowsocks", "port": 8388, "remark": "reserve"},
+                    ],
+                }
+
+        args = argparse.Namespace(inbound_id=None, inbound_remark=None, protocol=None, port=None)
+        self.assertEqual(xui_api.resolve_inbound_ids(args, {}, FakeApi()), [2])
+
+    def test_choose_users_path_falls_back_to_example(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            previous_local = xui_api.DEFAULT_USERS_FILE
+            previous_example = xui_api.DEFAULT_USERS_EXAMPLE_FILE
+            try:
+                xui_api.DEFAULT_USERS_FILE = Path(tmp) / "users.local.json"
+                xui_api.DEFAULT_USERS_EXAMPLE_FILE = Path(tmp) / "users.example.json"
+                self.assertEqual(xui_api.choose_users_path(None), xui_api.DEFAULT_USERS_EXAMPLE_FILE)
+            finally:
+                xui_api.DEFAULT_USERS_FILE = previous_local
+                xui_api.DEFAULT_USERS_EXAMPLE_FILE = previous_example
 
     def test_build_client_payload_uses_vless_defaults(self):
         args = argparse.Namespace(
