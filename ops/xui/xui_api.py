@@ -20,6 +20,10 @@ from urllib import error, parse, request
 DEFAULT_ENV_FILE = Path(__file__).with_name(".env.local")
 DEFAULT_CONFIG_FILE = Path(__file__).with_name("config.local.json")
 DEFAULT_BACKUP_DIR = Path("backups") / "x-ui"
+DEFAULT_USERS_FILE = Path(__file__).with_name("users.local.json")
+DEFAULT_USERS_EXAMPLE_FILE = Path(__file__).with_name("users.example.json")
+DEFAULT_INBOUND = {"protocol": "vless", "port": 443}
+DEFAULT_TUNNEL_LOCAL_PORT = 2096
 LOWER_NUM = string.ascii_lowercase + string.digits
 
 
@@ -56,6 +60,14 @@ def choose_config_path(raw: str | None) -> Path | None:
     if DEFAULT_CONFIG_FILE.exists():
         return DEFAULT_CONFIG_FILE
     return None
+
+
+def choose_users_path(raw: str | None) -> Path:
+    if raw:
+        return Path(raw)
+    if DEFAULT_USERS_FILE.exists():
+        return DEFAULT_USERS_FILE
+    return DEFAULT_USERS_EXAMPLE_FILE
 
 
 def normalize_base_url(raw: str) -> str:
@@ -234,17 +246,26 @@ def list_inbound_options(api: XuiClient) -> list[dict[str, Any]]:
     return obj if isinstance(obj, list) else []
 
 
-def resolve_inbound_ids(args: argparse.Namespace, config: dict[str, Any], api: XuiClient) -> list[int]:
-    explicit = getattr(args, "inbound_id", None)
-    if explicit:
-        if isinstance(explicit, int):
-            return [explicit]
-        return [int(item) for item in explicit]
+def parse_inbound_ids(value: Any) -> list[int]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, int):
+        return [value]
+    if isinstance(value, str):
+        return [int(item.strip()) for item in value.split(",") if item.strip()]
+    return [int(item) for item in value]
 
-    default_inbound = config.get("default_inbound") or {}
-    remark = getattr(args, "inbound_remark", None) or default_inbound.get("remark")
-    protocol = getattr(args, "protocol", None) or default_inbound.get("protocol")
-    port = getattr(args, "port", None) or default_inbound.get("port")
+
+def resolve_inbound_ids(args: argparse.Namespace, config: dict[str, Any], api: XuiClient) -> list[int]:
+    explicit = parse_inbound_ids(getattr(args, "inbound_id", None) or os.environ.get("MIRAGE_XUI_INBOUND_ID"))
+    if explicit:
+        return explicit
+
+    default_inbound = dict(DEFAULT_INBOUND)
+    default_inbound.update(config.get("default_inbound") or {})
+    remark = getattr(args, "inbound_remark", None) or os.environ.get("MIRAGE_XUI_INBOUND_REMARK") or default_inbound.get("remark")
+    protocol = getattr(args, "protocol", None) or os.environ.get("MIRAGE_XUI_INBOUND_PROTOCOL") or default_inbound.get("protocol")
+    port = getattr(args, "port", None) or os.environ.get("MIRAGE_XUI_INBOUND_PORT") or default_inbound.get("port")
     port = int(port) if port not in (None, "") else None
 
     options = list_inbound_options(api)
@@ -288,6 +309,22 @@ def public_host_value(args: argparse.Namespace, config: dict[str, Any]) -> str |
         parsed = parse.urlsplit("//" + host)
         host = parsed.hostname or host.split("/", 1)[0]
     return host
+
+
+def panel_url_parts(base_url: str) -> dict[str, Any]:
+    parsed = parse.urlsplit(normalize_base_url(base_url))
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    path = parsed.path or "/"
+    if not path.startswith("/"):
+        path = "/" + path
+    if not path.endswith("/"):
+        path += "/"
+    return {
+        "scheme": parsed.scheme,
+        "host": parsed.hostname or "127.0.0.1",
+        "port": port,
+        "path": path,
+    }
 
 
 def format_host(host: str) -> str:
@@ -404,7 +441,7 @@ def cmd_ensure_client(args: argparse.Namespace, config: dict[str, Any]) -> int:
 
 
 def cmd_sync_users(args: argparse.Namespace, config: dict[str, Any]) -> int:
-    users = load_json_file(Path(args.users))
+    users = load_json_file(choose_users_path(args.users))
     clients = users.get("clients", [])
     if not isinstance(clients, list):
         raise SystemExit("users file must contain a clients array.")
@@ -493,6 +530,47 @@ def cmd_status(args: argparse.Namespace, config: dict[str, Any]) -> int:
     return 0
 
 
+def cmd_access_info(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    base_url = option_value(args, config, "base_url", "MIRAGE_XUI_BASE_URL")
+    parts = panel_url_parts(base_url)
+    local_port = int(option_value(args, config, "local_port", "MIRAGE_XUI_TUNNEL_LOCAL_PORT", DEFAULT_TUNNEL_LOCAL_PORT))
+    ssh_host = option_value(args, config, "ssh_host", "MIRAGE_SSH_HOST", "SERVER_HOST")
+    ssh_user = option_value(args, config, "ssh_user", "MIRAGE_SSH_USER", "mirage")
+    ssh_key = option_value(args, config, "ssh_key", "MIRAGE_SSH_KEY", "$HOME\\.ssh\\mirage_ed25519")
+    local_panel_url = f"http://127.0.0.1:{local_port}{parts['path']}"
+    ssh_tunnel_command = (
+        f"ssh -i {ssh_key} -N -L {local_port}:127.0.0.1:{parts['port']} "
+        f"{ssh_user}@{ssh_host}"
+    )
+    info = {
+        "panel_port": parts["port"],
+        "web_base_path": parts["path"],
+        "local_panel_url": local_panel_url,
+        "ssh_tunnel_command": ssh_tunnel_command,
+        "docker_commands": {
+            "inbounds": "docker compose -f ops/xui/compose.yml run --rm xui-ops inbounds",
+            "sync_users": "docker compose -f ops/xui/compose.yml run --rm xui-ops sync-users --print-links",
+            "backup_db": "docker compose -f ops/xui/compose.yml run --rm xui-ops backup-db",
+        },
+    }
+    if args.json:
+        print_json(info)
+        return 0
+
+    print("3x-ui access")
+    print("------------")
+    print(f"Panel port on VPS: {info['panel_port']}")
+    print(f"Local browser URL: {info['local_panel_url']}")
+    print("")
+    print("PowerShell tunnel command:")
+    print(info["ssh_tunnel_command"])
+    print("")
+    print("VPS commands:")
+    for command in info["docker_commands"].values():
+        print(command)
+    return 0
+
+
 def add_common_client_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--email", required=True)
     parser.add_argument("--comment")
@@ -542,7 +620,7 @@ def build_parser() -> argparse.ArgumentParser:
     ensure.set_defaults(func=cmd_ensure_client)
 
     sync = sub.add_parser("sync-users", help="Ensure every client from a local users JSON file exists.")
-    sync.add_argument("--users", required=True)
+    sync.add_argument("--users")
     sync.add_argument("--print-links", action="store_true")
     sync.set_defaults(func=cmd_sync_users)
 
@@ -572,6 +650,13 @@ def build_parser() -> argparse.ArgumentParser:
     backup.set_defaults(func=cmd_backup_db)
 
     sub.add_parser("status", help="Print panel server status.").set_defaults(func=cmd_status)
+
+    access = sub.add_parser("access-info", help="Print panel URL, SSH tunnel command, and common ops commands.")
+    access.add_argument("--local-port", type=int)
+    access.add_argument("--ssh-host")
+    access.add_argument("--ssh-user")
+    access.add_argument("--ssh-key")
+    access.set_defaults(func=cmd_access_info)
     return parser
 
 

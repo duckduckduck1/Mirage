@@ -5,6 +5,6 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY ops/xui/xui_api.py /app/xui_api.py
+COPY ops/xui/ /app/ops/xui/
 
-ENTRYPOINT ["python", "/app/xui_api.py"]
+ENTRYPOINT ["python", "/app/ops/xui/xui_api.py"]

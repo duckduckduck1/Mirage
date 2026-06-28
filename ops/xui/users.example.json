@@ -2,12 +2,17 @@
   "clients": [
     {
       "email": "main",
-      "comment": "primary device group",
+      "comment": "owner devices",
       "group": "default"
     },
     {
-      "email": "tablet",
-      "comment": "tablet profile",
+      "email": "partner",
+      "comment": "partner devices",
+      "group": "default"
+    },
+    {
+      "email": "shared",
+      "comment": "shared access",
       "group": "default"
     }
   ]
