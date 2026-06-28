@@ -1,0 +1,14 @@
+{
+  "clients": [
+    {
+      "email": "main",
+      "comment": "primary device group",
+      "group": "default"
+    },
+    {
+      "email": "tablet",
+      "comment": "tablet profile",
+      "group": "default"
+    }
+  ]
+}
