@@ -236,13 +236,19 @@ cmd_render() {
   local front_port="${MTG_FRONT_PORT:-443}"
   local prefer_ip="${MTG_PREFER_IP:-prefer-ipv4}"
   local dns="${MTG_DNS:-https://1.1.1.1/dns-query}"
+  local auto_update="${MTG_AUTO_UPDATE:-false}"
+  local extra_defenses_enabled="${MTG_EXTRA_DEFENSES_ENABLED:-false}"
   local doppelganger_urls="${MTG_DOPPELGANGER_URLS:-https://vk.ru/}"
   local blocklist_enabled="${MTG_BLOCKLIST_ENABLED:-false}"
   local blocklist_urls="${MTG_BLOCKLIST_URLS:-https://iplists.firehol.org/files/firehol_level1.netset}"
+  local auto_update_toml
+  local extra_defenses_enabled_toml
   local blocklist_enabled_toml
 
   [[ "$front_port" =~ ^[0-9]+$ ]] || die "MTG_FRONT_PORT must be numeric"
   [[ -n "${MTG_SECRET:-}" ]] || die "MTG_SECRET is empty"
+  auto_update_toml="$(bool_value "$auto_update")" || die "MTG_AUTO_UPDATE must be true or false"
+  extra_defenses_enabled_toml="$(bool_value "$extra_defenses_enabled")" || die "MTG_EXTRA_DEFENSES_ENABLED must be true or false"
   blocklist_enabled_toml="$(bool_value "$blocklist_enabled")" || die "MTG_BLOCKLIST_ENABLED must be true or false"
 
   {
@@ -255,9 +261,7 @@ cmd_render() {
     if [[ -n "${MTG_PUBLIC_IPV4:-}" ]]; then
       printf 'public-ipv4 = "%s"\n' "$(toml_escape "$MTG_PUBLIC_IPV4")"
     fi
-    printf 'auto-update = true\n'
-    printf 'tolerate-time-skewness = "5s"\n'
-    printf 'allow-fallback-on-unknown-dc = false\n'
+    printf 'auto-update = %s\n' "$auto_update_toml"
     printf '\n'
     printf '[domain-fronting]\n'
     printf 'port = %s\n' "$front_port"
@@ -266,45 +270,35 @@ cmd_render() {
     printf 'dns = "%s"\n' "$(toml_escape "$dns")"
     printf 'proxies = []\n'
     printf '\n'
-    printf '[network.timeout]\n'
-    printf 'tcp = "5s"\n'
-    printf 'http = "10s"\n'
-    printf 'idle = "5m"\n'
-    printf 'handshake = "10s"\n'
-    printf '\n'
-    printf '[network.keep-alive]\n'
-    printf 'disabled = false\n'
-    printf 'idle = "15s"\n'
-    printf 'interval = "15s"\n'
-    printf 'count = 9\n'
-    printf '\n'
-    printf '[defense.doppelganger]\n'
-    printf 'urls = [\n'
-    toml_string_list_from_csv "$doppelganger_urls"
-    printf ']\n'
-    printf 'repeats-per-raid = 10\n'
-    printf 'raid-each = "6h"\n'
-    printf 'drs = false\n'
-    printf '\n'
-    printf '[defense.anti-replay]\n'
-    printf 'enabled = true\n'
-    printf 'max-size = "1mib"\n'
-    printf 'error-rate = 0.001\n'
-    printf '\n'
-    printf '[defense.blocklist]\n'
-    printf 'enabled = %s\n' "$blocklist_enabled_toml"
-    printf 'download-concurrency = 2\n'
-    printf 'urls = [\n'
-    toml_string_list_from_csv "$blocklist_urls"
-    printf ']\n'
-    printf 'update-each = "24h"\n'
-    printf '\n'
-    printf '[defense.allowlist]\n'
-    printf 'enabled = false\n'
-    printf 'download-concurrency = 2\n'
-    printf 'urls = []\n'
-    printf 'update-each = "24h"\n'
-    printf '\n'
+    if [[ "$extra_defenses_enabled_toml" == "true" ]]; then
+      printf '[defense.doppelganger]\n'
+      printf 'urls = [\n'
+      toml_string_list_from_csv "$doppelganger_urls"
+      printf ']\n'
+      printf 'repeats-per-raid = 10\n'
+      printf 'raid-each = "6h"\n'
+      printf 'drs = false\n'
+      printf '\n'
+      printf '[defense.anti-replay]\n'
+      printf 'enabled = true\n'
+      printf 'max-size = "1mib"\n'
+      printf 'error-rate = 0.001\n'
+      printf '\n'
+      printf '[defense.blocklist]\n'
+      printf 'enabled = %s\n' "$blocklist_enabled_toml"
+      printf 'download-concurrency = 2\n'
+      printf 'urls = [\n'
+      toml_string_list_from_csv "$blocklist_urls"
+      printf ']\n'
+      printf 'update-each = "24h"\n'
+      printf '\n'
+      printf '[defense.allowlist]\n'
+      printf 'enabled = false\n'
+      printf 'download-concurrency = 2\n'
+      printf 'urls = []\n'
+      printf 'update-each = "24h"\n'
+      printf '\n'
+    fi
     printf '[stats.prometheus]\n'
     printf 'enabled = true\n'
     printf 'bind-to = "%s"\n' "$(toml_escape "$metrics_bind")"
