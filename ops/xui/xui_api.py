@@ -597,6 +597,10 @@ def get_inbound(api: XuiClient, inbound_id: int) -> dict[str, Any] | None:
     return obj if isinstance(obj, dict) else None
 
 
+def delete_inbound(api: XuiClient, inbound_id: int) -> Any:
+    return api.api("POST", f"/panel/api/inbounds/del/{inbound_id}")
+
+
 def ensure_inbound_share_addr(api: XuiClient, inbound: dict[str, Any], public_host: str | None) -> tuple[dict[str, Any], bool]:
     if not public_host or not inbound.get("id"):
         return inbound, False
@@ -617,6 +621,12 @@ def ensure_vless_reality_inbound(args: argparse.Namespace, config: dict[str, Any
     filters = vless_inbound_filters(args, config)
     public_host = public_host_value(args, config)
     existing = find_vless_inbound(api, filters["port"], filters["remark"])
+    deleted = None
+    if existing and getattr(args, "reset_inbound", False):
+        delete_inbound(api, int(existing["id"]))
+        deleted = existing
+        existing = None
+
     if existing:
         inbound, changed = ensure_inbound_share_addr(api, existing, public_host)
         return {"changed": changed, "inbound": inbound, "scan": None, "shareAddrUpdated": changed}
@@ -643,232 +653,10 @@ def ensure_vless_reality_inbound(args: argparse.Namespace, config: dict[str, Any
     response = api.api("POST", "/panel/api/inbounds/add", payload)
     created = find_vless_inbound(api, filters["port"], filters["remark"])
     inbound, _share_changed = ensure_inbound_share_addr(api, created or extract_obj(response) or {}, public_host)
-    return {"changed": True, "inbound": inbound, "scan": scan, "api": response}
-
-
-def panel_url_parts(base_url: str) -> dict[str, Any]:
-    parsed = parse.urlsplit(normalize_base_url(base_url))
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    path = parsed.path or "/"
-    if not path.startswith("/"):
-        path = "/" + path
-    if not path.endswith("/"):
-        path += "/"
-    return {
-        "scheme": parsed.scheme,
-        "host": parsed.hostname or "127.0.0.1",
-        "port": port,
-        "path": path,
-    }
-
-
-def scoped_option(
-    args: argparse.Namespace,
-    config: dict[str, Any],
-    attr: str,
-    env_name: str,
-    section_name: str,
-    config_key: str,
-    default: Any = None,
-) -> Any:
-    value = getattr(args, attr, None)
-    if value not in (None, ""):
-        return value
-    env_value = os.environ.get(env_name)
-    if env_value not in (None, ""):
-        return env_value
-    section = config.get(section_name) or {}
-    if isinstance(section, dict) and section.get(config_key) not in (None, ""):
-        return section[config_key]
-    return default
-
-
-def get_reality_keypair(api: XuiClient) -> dict[str, str]:
-    payload = api.api("GET", "/panel/api/server/getNewX25519Cert")
-    obj = extract_obj(payload)
-    if not isinstance(obj, dict) or not obj.get("privateKey") or not obj.get("publicKey"):
-        raise ApiError("3x-ui did not return a Reality X25519 keypair.")
-    return {"privateKey": str(obj["privateKey"]), "publicKey": str(obj["publicKey"])}
-
-
-def scan_reality_target(api: XuiClient, target: str) -> dict[str, Any] | None:
-    payload = api.api("POST", "/panel/api/server/scanRealityTarget", {"target": target}, expect_success=False)
-    if not isinstance(payload, dict) or not payload.get("success"):
-        return None
-    obj = payload.get("obj")
-    return obj if isinstance(obj, dict) else None
-
-
-def vless_inbound_filters(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "port": int(scoped_option(args, config, "vless_port", "MIRAGE_XUI_VLESS_PORT", "vless_inbound", "port", 443)),
-        "remark": str(
-            scoped_option(
-                args,
-                config,
-                "vless_remark",
-                "MIRAGE_XUI_VLESS_REMARK",
-                "vless_inbound",
-                "remark",
-                DEFAULT_VLESS_REMARK,
-            )
-        ),
-    }
-
-
-def find_vless_inbound(api: XuiClient, port: int, remark: str | None = None) -> dict[str, Any] | None:
-    matches = [
-        item
-        for item in list_inbound_options(api)
-        if item.get("protocol") == "vless" and int(item.get("port") or 0) == port
-    ]
-    if remark:
-        exact = [item for item in matches if item.get("remark") == remark]
-        if exact:
-            return exact[0]
-    return matches[0] if matches else None
-
-
-def build_vless_reality_payload(
-    args: argparse.Namespace,
-    config: dict[str, Any],
-    keypair: dict[str, str],
-    scan_result: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    filters = vless_inbound_filters(args, config)
-    target = str(
-        scoped_option(
-            args,
-            config,
-            "reality_target",
-            "MIRAGE_XUI_REALITY_TARGET",
-            "vless_inbound",
-            "reality_target",
-            DEFAULT_REALITY_TARGET,
-        )
-    ).strip()
-    sni = str(
-        scoped_option(
-            args,
-            config,
-            "reality_sni",
-            "MIRAGE_XUI_REALITY_SNI",
-            "vless_inbound",
-            "reality_sni",
-            DEFAULT_REALITY_SNI,
-        )
-    ).strip()
-    listen = str(
-        scoped_option(args, config, "vless_listen", "MIRAGE_XUI_VLESS_LISTEN", "vless_inbound", "listen", "")
-    )
-    short_ids = scoped_option(
-        args,
-        config,
-        "reality_short_ids",
-        "MIRAGE_XUI_REALITY_SHORT_IDS",
-        "vless_inbound",
-        "reality_short_ids",
-        None,
-    )
-    if isinstance(short_ids, str) and short_ids.strip():
-        short_id_list = [item.strip() for item in short_ids.split(",") if item.strip()]
-    elif isinstance(short_ids, list):
-        short_id_list = [str(item).strip() for item in short_ids if str(item).strip()]
-    else:
-        short_id_list = random_short_ids()
-
-    server_names = [sni]
-    if scan_result and scan_result.get("feasible") and isinstance(scan_result.get("serverNames"), list):
-        names = [str(item).strip() for item in scan_result["serverNames"] if str(item).strip()]
-        if sni in names:
-            server_names = [sni]
-        elif names:
-            server_names = [names[0]]
-
-    return {
-        "up": 0,
-        "down": 0,
-        "total": 0,
-        "remark": filters["remark"],
-        "enable": True,
-        "expiryTime": 0,
-        "trafficReset": "never",
-        "lastTrafficResetTime": 0,
-        "listen": listen,
-        "port": filters["port"],
-        "protocol": "vless",
-        "settings": {
-            "clients": [],
-            "decryption": "none",
-            "encryption": "none",
-            "fallbacks": [],
-        },
-        "streamSettings": {
-            "network": "tcp",
-            "security": "reality",
-            "tcpSettings": {
-                "acceptProxyProtocol": False,
-                "header": {"type": "none"},
-            },
-            "realitySettings": {
-                "show": False,
-                "xver": 0,
-                "target": target,
-                "serverNames": server_names,
-                "privateKey": keypair["privateKey"],
-                "minClientVer": "",
-                "maxClientVer": "",
-                "maxTimediff": 0,
-                "shortIds": short_id_list,
-                "mldsa65Seed": "",
-                "settings": {
-                    "publicKey": keypair["publicKey"],
-                    "fingerprint": "chrome",
-                    "serverName": "",
-                    "spiderX": "/",
-                    "mldsa65Verify": "",
-                },
-            },
-        },
-        "sniffing": {
-            "enabled": True,
-            "destOverride": ["http", "tls", "quic"],
-        },
-        "tag": f"in-{filters['port']}-tcp",
-        "shareAddrStrategy": "listen",
-        "shareAddr": "",
-        "subSortIndex": 1,
-    }
-
-
-def ensure_vless_reality_inbound(args: argparse.Namespace, config: dict[str, Any], api: XuiClient) -> dict[str, Any]:
-    filters = vless_inbound_filters(args, config)
-    existing = find_vless_inbound(api, filters["port"], filters["remark"])
-    if existing:
-        return {"changed": False, "inbound": existing, "scan": None}
-
-    target = str(
-        scoped_option(
-            args,
-            config,
-            "reality_target",
-            "MIRAGE_XUI_REALITY_TARGET",
-            "vless_inbound",
-            "reality_target",
-            DEFAULT_REALITY_TARGET,
-        )
-    ).strip()
-    scan = None
-    if not getattr(args, "skip_reality_scan", False):
-        scan = scan_reality_target(api, target)
-        if getattr(args, "strict_reality_scan", False) and (not scan or not scan.get("feasible")):
-            reason = scan.get("reason") if isinstance(scan, dict) else "scan failed"
-            raise SystemExit(f"Reality target is not feasible: {reason}")
-
-    payload = build_vless_reality_payload(args, config, get_reality_keypair(api), scan)
-    response = api.api("POST", "/panel/api/inbounds/add", payload)
-    created = find_vless_inbound(api, filters["port"], filters["remark"])
-    return {"changed": True, "inbound": created or extract_obj(response), "scan": scan, "api": response}
+    result = {"changed": True, "inbound": inbound, "scan": scan, "api": response}
+    if deleted:
+        result["deletedInbound"] = deleted
+    return result
 
 
 def panel_url_parts(base_url: str) -> dict[str, Any]:
@@ -985,6 +773,9 @@ def cmd_ensure_vless_inbound(args: argparse.Namespace, config: dict[str, Any]) -
     print(f"id: {inbound.get('id')}")
     print(f"port: {inbound.get('port')}")
     print(f"remark: {inbound.get('remark')}")
+    deleted = result.get("deletedInbound")
+    if isinstance(deleted, dict):
+        print(f"deleted previous inbound id: {deleted.get('id')}")
     print_public_host_warning(public_host_value(args, config))
     scan = result.get("scan")
     if isinstance(scan, dict):
@@ -1166,7 +957,12 @@ def cmd_access_info(args: argparse.Namespace, config: dict[str, Any]) -> int:
         "docker_commands": {
             "inbounds": "docker compose -f ops/xui/compose.yml run --rm xui-ops inbounds",
             "public_host": "docker compose -f ops/xui/compose.yml run --rm xui-ops public-host",
+            "vpn_diagnose": "docker compose -f ops/xui/compose.yml run --rm xui-ops vpn-diagnose",
             "bootstrap_vpn": "docker compose -f ops/xui/compose.yml run --rm xui-ops bootstrap-vpn --print-links",
+            "reset_bootstrap_vpn": (
+                "docker compose -f ops/xui/compose.yml run --rm xui-ops "
+                "bootstrap-vpn --reset-inbound --print-links"
+            ),
             "sync_users": "docker compose -f ops/xui/compose.yml run --rm xui-ops sync-users --print-links",
             "backup_db": "docker compose -f ops/xui/compose.yml run --rm xui-ops backup-db",
         },
@@ -1187,6 +983,128 @@ def cmd_access_info(args: argparse.Namespace, config: dict[str, Any]) -> int:
     print("VPS commands:")
     for command in info["docker_commands"].values():
         print(command)
+    return 0
+
+
+def json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def build_vpn_diagnostics(args: argparse.Namespace, config: dict[str, Any], api: XuiClient) -> dict[str, Any]:
+    filters = vless_inbound_filters(args, config)
+    public_host = public_host_value(args, config)
+    option = find_vless_inbound(api, filters["port"], filters["remark"])
+    output: dict[str, Any] = {
+        "public_host": public_host,
+        "filters": filters,
+        "inbound": None,
+        "warnings": [],
+    }
+    if not option:
+        output["warnings"].append("VLESS inbound was not found.")
+        return output
+
+    full = get_inbound(api, int(option["id"])) or option
+    settings = json_object(full.get("settings"))
+    stream = json_object(full.get("streamSettings"))
+    reality = json_object(stream.get("realitySettings"))
+    reality_settings = json_object(reality.get("settings"))
+    sniffing = json_object(full.get("sniffing"))
+    clients_raw = settings.get("clients") if isinstance(settings.get("clients"), list) else []
+    client_emails = [
+        str(client.get("email"))
+        for client in clients_raw
+        if isinstance(client, dict) and client.get("email")
+    ]
+    short_ids = reality.get("shortIds") if isinstance(reality.get("shortIds"), list) else []
+
+    inbound = {
+        "id": full.get("id"),
+        "port": full.get("port"),
+        "protocol": full.get("protocol"),
+        "remark": full.get("remark"),
+        "enable": full.get("enable"),
+        "listen": full.get("listen"),
+        "tag": full.get("tag"),
+        "shareAddrStrategy": full.get("shareAddrStrategy"),
+        "shareAddr": full.get("shareAddr"),
+        "network": stream.get("network"),
+        "security": stream.get("security"),
+        "target": reality.get("target"),
+        "serverNames": reality.get("serverNames"),
+        "fingerprint": reality_settings.get("fingerprint"),
+        "spiderX": reality_settings.get("spiderX"),
+        "shortIdsCount": len(short_ids),
+        "privateKeyPresent": bool(reality.get("privateKey")),
+        "publicKeyPresent": bool(reality_settings.get("publicKey")),
+        "sniffingEnabled": sniffing.get("enabled"),
+        "clientsCount": len(client_emails),
+        "clients": client_emails,
+    }
+    output["inbound"] = inbound
+
+    if inbound["protocol"] != "vless":
+        output["warnings"].append("Inbound protocol is not vless.")
+    if inbound["network"] != "tcp":
+        output["warnings"].append("Inbound network is not tcp.")
+    if inbound["security"] != "reality":
+        output["warnings"].append("Inbound security is not reality.")
+    if not inbound["privateKeyPresent"] or not inbound["publicKeyPresent"]:
+        output["warnings"].append("Reality keypair is incomplete.")
+    if not inbound["target"] or not inbound["serverNames"]:
+        output["warnings"].append("Reality target or SNI is missing.")
+    if not inbound["clientsCount"]:
+        output["warnings"].append("No clients are attached to the inbound.")
+    if public_host and (inbound["shareAddrStrategy"] != "custom" or inbound["shareAddr"] != public_host):
+        output["warnings"].append("Inbound share address does not match the public host.")
+    return output
+
+
+def cmd_vpn_diagnose(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    config = config_with_public_host(args, config, auto_detect=True)
+    api = api_from_args(args, config)
+    diagnostics = build_vpn_diagnostics(args, config, api)
+    if args.json:
+        print_json(diagnostics)
+        return 0
+
+    inbound = diagnostics.get("inbound") or {}
+    print("VPN diagnose")
+    print("------------")
+    print(f"public host: {diagnostics.get('public_host') or 'not detected'}")
+    if not inbound:
+        print("vless inbound: missing")
+    else:
+        print(f"vless inbound: id={inbound.get('id')} port={inbound.get('port')} enabled={inbound.get('enable')}")
+        print(f"remark: {inbound.get('remark')}")
+        print(f"share address: {inbound.get('shareAddrStrategy')} {inbound.get('shareAddr') or ''}".rstrip())
+        print(f"stream: {inbound.get('network')} + {inbound.get('security')}")
+        print(f"reality target: {inbound.get('target')}")
+        print(f"reality sni: {', '.join(inbound.get('serverNames') or [])}")
+        print(f"fingerprint: {inbound.get('fingerprint')}")
+        print(f"keys present: private={inbound.get('privateKeyPresent')} public={inbound.get('publicKeyPresent')}")
+        print(f"short ids: {inbound.get('shortIdsCount')}")
+        print(f"clients: {inbound.get('clientsCount')} ({', '.join(inbound.get('clients') or [])})")
+
+    warnings = diagnostics.get("warnings") or []
+    if warnings:
+        print("")
+        print("warnings:")
+        for warning in warnings:
+            print(f"- {warning}")
+    else:
+        print("")
+        print("warnings: none")
+    print("")
+    print("Links, client UUIDs, shortIds, and keys are not printed by this command.")
     return 0
 
 
@@ -1226,6 +1144,9 @@ def cmd_bootstrap_vpn(args: argparse.Namespace, config: dict[str, Any]) -> int:
     print(f"id: {inbound.get('id')}")
     print(f"port: {inbound.get('port')}")
     print(f"remark: {inbound.get('remark')}")
+    deleted = inbound_result.get("deletedInbound")
+    if isinstance(deleted, dict):
+        print(f"deleted previous inbound id: {deleted.get('id')}")
     print_public_host_warning(public_host_value(args, config))
     scan = inbound_result.get("scan")
     if isinstance(scan, dict):
@@ -1273,6 +1194,7 @@ def add_vless_inbound_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--reality-target")
     parser.add_argument("--reality-sni")
     parser.add_argument("--reality-short-ids")
+    parser.add_argument("--reset-inbound", action="store_true")
     parser.add_argument("--skip-reality-scan", action="store_true")
     parser.add_argument("--strict-reality-scan", action="store_true")
 
@@ -1295,6 +1217,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("inbounds", help="List inbound options.").set_defaults(func=cmd_inbounds)
 
     sub.add_parser("public-host", help="Print the public host used in generated client links.").set_defaults(func=cmd_public_host)
+
+    diagnose = sub.add_parser("vpn-diagnose", help="Print a safe summary of the default VLESS Reality inbound.")
+    add_vless_inbound_args(diagnose)
+    diagnose.set_defaults(func=cmd_vpn_diagnose)
 
     token = sub.add_parser("create-token", help="Create a 3x-ui API token.")
     token.add_argument("--name", required=True)

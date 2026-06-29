@@ -108,6 +108,136 @@ class XuiApiTests(unittest.TestCase):
 
         self.assertIsNone(xui_api.scan_reality_target(FakeApi(), "www.microsoft.com:443"))
 
+    def test_reset_vless_inbound_deletes_and_recreates(self):
+        class FakeApi:
+            def __init__(self):
+                self.deleted = []
+                self.added = None
+
+            def api(self, method, path, data=None, expect_success=True):
+                if path == "/panel/api/inbounds/options":
+                    if self.added:
+                        return {
+                            "success": True,
+                            "obj": [
+                                {
+                                    "id": 4,
+                                    "protocol": "vless",
+                                    "port": 443,
+                                    "remark": "vless-reality-vision",
+                                }
+                            ],
+                        }
+                    if self.deleted:
+                        return {"success": True, "obj": []}
+                    return {
+                        "success": True,
+                        "obj": [
+                            {
+                                "id": 2,
+                                "protocol": "vless",
+                                "port": 443,
+                                "remark": "vless-reality-vision",
+                            }
+                        ],
+                    }
+                if method == "POST" and path == "/panel/api/inbounds/del/2":
+                    self.deleted.append(2)
+                    return {"success": True}
+                if path == "/panel/api/server/getNewX25519Cert":
+                    return {"success": True, "obj": {"privateKey": "private", "publicKey": "public"}}
+                if method == "POST" and path == "/panel/api/inbounds/add":
+                    self.added = data
+                    return {"success": True, "obj": {"id": 4}}
+                raise AssertionError(path)
+
+        args = argparse.Namespace(
+            public_host=None,
+            vless_port=None,
+            vless_remark=None,
+            vless_listen=None,
+            reality_target=None,
+            reality_sni=None,
+            reality_short_ids="ab",
+            reset_inbound=True,
+            skip_reality_scan=True,
+            strict_reality_scan=False,
+        )
+        api = FakeApi()
+        result = xui_api.ensure_vless_reality_inbound(args, {}, api)
+        self.assertTrue(result["changed"])
+        self.assertEqual(api.deleted, [2])
+        self.assertEqual(result["deletedInbound"]["id"], 2)
+        self.assertEqual(result["inbound"]["id"], 4)
+        self.assertEqual(api.added["streamSettings"]["security"], "reality")
+
+    def test_build_vpn_diagnostics_hides_sensitive_values(self):
+        class FakeApi:
+            def api(self, _method, path, data=None, expect_success=True):
+                if path == "/panel/api/inbounds/options":
+                    return {
+                        "success": True,
+                        "obj": [
+                            {
+                                "id": 4,
+                                "protocol": "vless",
+                                "port": 443,
+                                "remark": "vless-reality-vision",
+                            }
+                        ],
+                    }
+                if path == "/panel/api/inbounds/get/4":
+                    return {
+                        "success": True,
+                        "obj": {
+                            "id": 4,
+                            "protocol": "vless",
+                            "port": 443,
+                            "remark": "vless-reality-vision",
+                            "enable": True,
+                            "shareAddrStrategy": "custom",
+                            "shareAddr": "vpn.example.net",
+                            "settings": {
+                                "clients": [
+                                    {
+                                        "email": "main",
+                                        "id": "secret-uuid",
+                                    }
+                                ]
+                            },
+                            "streamSettings": {
+                                "network": "tcp",
+                                "security": "reality",
+                                "realitySettings": {
+                                    "target": "www.microsoft.com:443",
+                                    "serverNames": ["www.microsoft.com"],
+                                    "privateKey": "secret-private-key",
+                                    "shortIds": ["secret-short-id"],
+                                    "settings": {
+                                        "publicKey": "secret-public-key",
+                                        "fingerprint": "chrome",
+                                        "spiderX": "/",
+                                    },
+                                },
+                            },
+                            "sniffing": {"enabled": True},
+                        },
+                    }
+                raise AssertionError(path)
+
+        args = argparse.Namespace(vless_port=None, vless_remark=None)
+        diagnostics = xui_api.build_vpn_diagnostics(args, {"public_host": "vpn.example.net"}, FakeApi())
+        inbound = diagnostics["inbound"]
+        self.assertEqual(inbound["target"], "www.microsoft.com:443")
+        self.assertEqual(inbound["clients"], ["main"])
+        self.assertTrue(inbound["privateKeyPresent"])
+        self.assertTrue(inbound["publicKeyPresent"])
+        self.assertNotIn("secret-private-key", str(diagnostics))
+        self.assertNotIn("secret-public-key", str(diagnostics))
+        self.assertNotIn("secret-short-id", str(diagnostics))
+        self.assertNotIn("secret-uuid", str(diagnostics))
+        self.assertEqual(diagnostics["warnings"], [])
+
     def test_ensure_client_attaches_existing_client(self):
         class FakeApi:
             def __init__(self):
