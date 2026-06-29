@@ -6,8 +6,6 @@
 *.crt
 *.p12
 secrets/
-ops/tg-ws-proxy/.env.local
-ops/tg-ws-proxy/*.local.*
 backups/
 exports/
 *.backup

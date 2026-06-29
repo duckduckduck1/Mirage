@@ -28,7 +28,7 @@ class XuiApiTests(unittest.TestCase):
 
     def test_public_host_accepts_url_or_hostport(self):
         args = argparse.Namespace(public_host=None)
-        config = {"public_host": "https://vpn.example.net:8443/panel"}
+        config = {"public_host": "https://vpn.example.net/panel"}
         self.assertEqual(xui_api.public_host_value(args, config), "vpn.example.net")
 
     def test_public_host_rejects_placeholders_and_localhost(self):
@@ -48,7 +48,7 @@ class XuiApiTests(unittest.TestCase):
                     "success": True,
                     "obj": [
                         {"id": 2, "protocol": "vless", "port": 443, "remark": "vless-reality-vision"},
-                        {"id": 3, "protocol": "shadowsocks", "port": 8388, "remark": "reserve"},
+                        {"id": 3, "protocol": "vless", "port": 2053, "remark": "old-vless-test"},
                     ],
                 }
 
@@ -282,7 +282,7 @@ class XuiApiTests(unittest.TestCase):
                     "success": True,
                     "obj": [
                         {"id": 2, "protocol": "vless", "port": 443, "remark": "vless-reality-vision"},
-                        {"id": 3, "protocol": "shadowsocks", "port": 8388, "remark": "reserve"},
+                        {"id": 3, "protocol": "vless", "port": 2053, "remark": "old-vless-test"},
                     ],
                 }
 

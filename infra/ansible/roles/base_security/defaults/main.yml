@@ -10,8 +10,7 @@ allowed_tcp_ports:
   - 22
   - 443
 
-revoked_tcp_ports:
-  - 8388
+revoked_tcp_ports: []
 
 enable_ufw: true
 enable_fail2ban: true
