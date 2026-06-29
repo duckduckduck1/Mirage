@@ -8,6 +8,8 @@
 secrets/
 config.toml              # mtg: содержит FakeTLS-секрет, генерится на сервере
 mtg/config.toml
+ops/mtproxy/config.local.toml
+ops/mtproxy/*.local.toml
 backups/
 exports/
 *.backup
