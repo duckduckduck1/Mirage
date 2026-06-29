@@ -29,8 +29,16 @@ if [ "${TG_WS_NO_CFPROXY:-false}" = "true" ]; then
   set -- "$@" --no-cfproxy
 fi
 
+if [ -n "${TG_WS_CFPROXY_DOMAIN:-}" ]; then
+  set -- "$@" --cfproxy-domain "$TG_WS_CFPROXY_DOMAIN"
+fi
+
 if [ -n "${TG_WS_FAKE_TLS_DOMAIN:-}" ]; then
   set -- "$@" --fake-tls-domain "$TG_WS_FAKE_TLS_DOMAIN"
+fi
+
+if [ "${TG_WS_PROXY_PROTOCOL:-false}" = "true" ]; then
+  set -- "$@" --proxy-protocol
 fi
 
 if [ "${TG_WS_VERBOSE:-false}" = "true" ]; then
