@@ -6,10 +6,6 @@
 *.crt
 *.p12
 secrets/
-config.toml              # mtg: содержит FakeTLS-секрет, генерится на сервере
-mtg/config.toml
-ops/mtproxy/config.local.toml
-ops/mtproxy/*.local.toml
 ops/tg-ws-proxy/.env.local
 ops/tg-ws-proxy/*.local.*
 backups/
