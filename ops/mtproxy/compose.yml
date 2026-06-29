@@ -1,0 +1,15 @@
+services:
+  mtproxy:
+    image: ${MTG_IMAGE:-nineseconds/mtg:2.2.8}
+    container_name: mirage-mtproxy
+    restart: unless-stopped
+    ports:
+      - "${MTG_PUBLIC_PORT:-8443}:3128/tcp"
+      - "127.0.0.1:${MTG_METRICS_PORT:-3129}:3129/tcp"
+    volumes:
+      - ./config.local.toml:/config/config.toml:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
