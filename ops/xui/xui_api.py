@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 import http.cookiejar
+import ipaddress
 import json
 import os
 import secrets
+import socket
 import string
 import sys
 import time
@@ -29,6 +31,11 @@ DEFAULT_REALITY_TARGET = "www.microsoft.com:443"
 DEFAULT_REALITY_SNI = "www.microsoft.com"
 LOWER_NUM = string.ascii_lowercase + string.digits
 HEX = string.hexdigits.lower()[:16]
+PUBLIC_IP_ENDPOINTS = (
+    "https://api.ipify.org",
+    "https://checkip.amazonaws.com",
+    "https://ifconfig.me/ip",
+)
 
 
 class ApiError(RuntimeError):
@@ -309,12 +316,21 @@ def get_client(api: XuiClient, email: str) -> dict[str, Any] | None:
     return obj if isinstance(obj, dict) else None
 
 
-def public_host_value(args: argparse.Namespace, config: dict[str, Any]) -> str | None:
-    host = option_value(args, config, "public_host", "MIRAGE_XUI_PUBLIC_HOST")
+def is_placeholder_host(host: str) -> bool:
+    normalized = host.strip().lower()
+    return (
+        not normalized
+        or normalized.startswith("server_")
+        or normalized in {"server_host", "server_host_or_domain", "server_ip", "public_host", "example.com"}
+        or normalized.endswith(".example.com")
+    )
+
+
+def normalize_public_host(host: Any) -> str | None:
     if not host:
         return None
     host = str(host).strip()
-    if not host or host.startswith("SERVER_"):
+    if is_placeholder_host(host):
         return None
     if "://" in host:
         parsed = parse.urlsplit(host)
@@ -322,7 +338,328 @@ def public_host_value(args: argparse.Namespace, config: dict[str, Any]) -> str |
     elif "/" in host or ":" in host:
         parsed = parse.urlsplit("//" + host)
         host = parsed.hostname or host.split("/", 1)[0]
-    return host
+    host = host.strip().strip("[]")
+    if is_placeholder_host(host) or host in {"localhost", "127.0.0.1", "::1"}:
+        return None
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return host
+    return str(address) if address.is_global else None
+
+
+def public_host_value(args: argparse.Namespace, config: dict[str, Any]) -> str | None:
+    host = option_value(args, config, "public_host", "MIRAGE_XUI_PUBLIC_HOST")
+    return normalize_public_host(host)
+
+
+def public_host_from_route() -> str | None:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(2)
+            sock.connect(("1.1.1.1", 80))
+            return normalize_public_host(sock.getsockname()[0])
+    except OSError:
+        return None
+
+
+def public_host_from_web(timeout: int = 4) -> str | None:
+    for endpoint in PUBLIC_IP_ENDPOINTS:
+        req = request.Request(endpoint, headers={"User-Agent": "Mirage xui-ops"})
+        try:
+            with request.urlopen(req, timeout=timeout) as response:
+                host = response.read(128).decode("utf-8", errors="replace").strip()
+        except (OSError, error.URLError):
+            continue
+        normalized = normalize_public_host(host)
+        if normalized:
+            return normalized
+    return None
+
+
+def detect_public_host() -> str | None:
+    normalized = normalize_public_host(os.environ.get("MIRAGE_SSH_HOST"))
+    if normalized:
+        return normalized
+    return public_host_from_route() or public_host_from_web()
+
+
+def resolve_public_host(args: argparse.Namespace, config: dict[str, Any], auto_detect: bool = False) -> str | None:
+    explicit = public_host_value(args, config)
+    if explicit:
+        return explicit
+    return detect_public_host() if auto_detect else None
+
+
+def config_with_public_host(args: argparse.Namespace, config: dict[str, Any], auto_detect: bool = False) -> dict[str, Any]:
+    public_host = resolve_public_host(args, config, auto_detect=auto_detect)
+    if not public_host:
+        return config
+    merged = dict(config)
+    merged["public_host"] = public_host
+    return merged
+
+
+def print_public_host_warning(public_host: str | None) -> None:
+    if public_host:
+        print(f"public host for links: {public_host}")
+        return
+    print("public host for links: not detected")
+    print("Set MIRAGE_XUI_PUBLIC_HOST in ops/xui/.env.local and run the command again.")
+
+
+def scoped_option(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    attr: str,
+    env_name: str,
+    section_name: str,
+    config_key: str,
+    default: Any = None,
+) -> Any:
+    value = getattr(args, attr, None)
+    if value not in (None, ""):
+        return value
+    env_value = os.environ.get(env_name)
+    if env_value not in (None, ""):
+        return env_value
+    section = config.get(section_name) or {}
+    if isinstance(section, dict) and section.get(config_key) not in (None, ""):
+        return section[config_key]
+    return default
+
+
+def get_reality_keypair(api: XuiClient) -> dict[str, str]:
+    payload = api.api("GET", "/panel/api/server/getNewX25519Cert")
+    obj = extract_obj(payload)
+    if not isinstance(obj, dict) or not obj.get("privateKey") or not obj.get("publicKey"):
+        raise ApiError("3x-ui did not return a Reality X25519 keypair.")
+    return {"privateKey": str(obj["privateKey"]), "publicKey": str(obj["publicKey"])}
+
+
+def scan_reality_target(api: XuiClient, target: str) -> dict[str, Any] | None:
+    try:
+        payload = api.api("POST", "/panel/api/server/scanRealityTarget", {"target": target}, expect_success=False)
+    except ApiError:
+        return None
+    if not isinstance(payload, dict) or not payload.get("success"):
+        return None
+    obj = payload.get("obj")
+    return obj if isinstance(obj, dict) else None
+
+
+def vless_inbound_filters(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "port": int(scoped_option(args, config, "vless_port", "MIRAGE_XUI_VLESS_PORT", "vless_inbound", "port", 443)),
+        "remark": str(
+            scoped_option(
+                args,
+                config,
+                "vless_remark",
+                "MIRAGE_XUI_VLESS_REMARK",
+                "vless_inbound",
+                "remark",
+                DEFAULT_VLESS_REMARK,
+            )
+        ),
+    }
+
+
+def find_vless_inbound(api: XuiClient, port: int, remark: str | None = None) -> dict[str, Any] | None:
+    matches = [
+        item
+        for item in list_inbound_options(api)
+        if item.get("protocol") == "vless" and int(item.get("port") or 0) == port
+    ]
+    if remark:
+        exact = [item for item in matches if item.get("remark") == remark]
+        if exact:
+            return exact[0]
+    return matches[0] if matches else None
+
+
+def build_vless_reality_payload(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    keypair: dict[str, str],
+    scan_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    filters = vless_inbound_filters(args, config)
+    public_host = public_host_value(args, config)
+    target = str(
+        scoped_option(
+            args,
+            config,
+            "reality_target",
+            "MIRAGE_XUI_REALITY_TARGET",
+            "vless_inbound",
+            "reality_target",
+            DEFAULT_REALITY_TARGET,
+        )
+    ).strip()
+    sni = str(
+        scoped_option(
+            args,
+            config,
+            "reality_sni",
+            "MIRAGE_XUI_REALITY_SNI",
+            "vless_inbound",
+            "reality_sni",
+            DEFAULT_REALITY_SNI,
+        )
+    ).strip()
+    listen = str(
+        scoped_option(args, config, "vless_listen", "MIRAGE_XUI_VLESS_LISTEN", "vless_inbound", "listen", "")
+    )
+    short_ids = scoped_option(
+        args,
+        config,
+        "reality_short_ids",
+        "MIRAGE_XUI_REALITY_SHORT_IDS",
+        "vless_inbound",
+        "reality_short_ids",
+        None,
+    )
+    if isinstance(short_ids, str) and short_ids.strip():
+        short_id_list = [item.strip() for item in short_ids.split(",") if item.strip()]
+    elif isinstance(short_ids, list):
+        short_id_list = [str(item).strip() for item in short_ids if str(item).strip()]
+    else:
+        short_id_list = random_short_ids()
+
+    server_names = [sni]
+    if scan_result and scan_result.get("feasible") and isinstance(scan_result.get("serverNames"), list):
+        names = [str(item).strip() for item in scan_result["serverNames"] if str(item).strip()]
+        if sni in names:
+            server_names = [sni]
+        elif names:
+            server_names = [names[0]]
+
+    return {
+        "up": 0,
+        "down": 0,
+        "total": 0,
+        "remark": filters["remark"],
+        "enable": True,
+        "expiryTime": 0,
+        "trafficReset": "never",
+        "lastTrafficResetTime": 0,
+        "listen": listen,
+        "port": filters["port"],
+        "protocol": "vless",
+        "settings": {
+            "clients": [],
+            "decryption": "none",
+            "encryption": "none",
+            "fallbacks": [],
+        },
+        "streamSettings": {
+            "network": "tcp",
+            "security": "reality",
+            "tcpSettings": {
+                "acceptProxyProtocol": False,
+                "header": {"type": "none"},
+            },
+            "realitySettings": {
+                "show": False,
+                "xver": 0,
+                "target": target,
+                "serverNames": server_names,
+                "privateKey": keypair["privateKey"],
+                "minClientVer": "",
+                "maxClientVer": "",
+                "maxTimediff": 0,
+                "shortIds": short_id_list,
+                "mldsa65Seed": "",
+                "settings": {
+                    "publicKey": keypair["publicKey"],
+                    "fingerprint": "chrome",
+                    "serverName": "",
+                    "spiderX": "/",
+                    "mldsa65Verify": "",
+                },
+            },
+        },
+        "sniffing": {
+            "enabled": True,
+            "destOverride": ["http", "tls", "quic"],
+        },
+        "tag": f"in-{filters['port']}-tcp",
+        "shareAddrStrategy": "custom" if public_host else "listen",
+        "shareAddr": public_host or "",
+        "subSortIndex": 1,
+    }
+
+
+def get_inbound(api: XuiClient, inbound_id: int) -> dict[str, Any] | None:
+    payload = api.api("GET", f"/panel/api/inbounds/get/{inbound_id}")
+    obj = extract_obj(payload)
+    return obj if isinstance(obj, dict) else None
+
+
+def ensure_inbound_share_addr(api: XuiClient, inbound: dict[str, Any], public_host: str | None) -> tuple[dict[str, Any], bool]:
+    if not public_host or not inbound.get("id"):
+        return inbound, False
+    inbound_id = int(inbound["id"])
+    full = get_inbound(api, inbound_id)
+    if not full:
+        return inbound, False
+    if full.get("shareAddrStrategy") == "custom" and full.get("shareAddr") == public_host:
+        return full, False
+    full["shareAddrStrategy"] = "custom"
+    full["shareAddr"] = public_host
+    api.api("POST", f"/panel/api/inbounds/update/{inbound_id}", full)
+    refreshed = get_inbound(api, inbound_id)
+    return refreshed or inbound, True
+
+
+def ensure_vless_reality_inbound(args: argparse.Namespace, config: dict[str, Any], api: XuiClient) -> dict[str, Any]:
+    filters = vless_inbound_filters(args, config)
+    public_host = public_host_value(args, config)
+    existing = find_vless_inbound(api, filters["port"], filters["remark"])
+    if existing:
+        inbound, changed = ensure_inbound_share_addr(api, existing, public_host)
+        return {"changed": changed, "inbound": inbound, "scan": None, "shareAddrUpdated": changed}
+
+    target = str(
+        scoped_option(
+            args,
+            config,
+            "reality_target",
+            "MIRAGE_XUI_REALITY_TARGET",
+            "vless_inbound",
+            "reality_target",
+            DEFAULT_REALITY_TARGET,
+        )
+    ).strip()
+    scan = None
+    if not getattr(args, "skip_reality_scan", False):
+        scan = scan_reality_target(api, target)
+        if getattr(args, "strict_reality_scan", False) and (not scan or not scan.get("feasible")):
+            reason = scan.get("reason") if isinstance(scan, dict) else "scan failed"
+            raise SystemExit(f"Reality target is not feasible: {reason}")
+
+    payload = build_vless_reality_payload(args, config, get_reality_keypair(api), scan)
+    response = api.api("POST", "/panel/api/inbounds/add", payload)
+    created = find_vless_inbound(api, filters["port"], filters["remark"])
+    inbound, _share_changed = ensure_inbound_share_addr(api, created or extract_obj(response) or {}, public_host)
+    return {"changed": True, "inbound": inbound, "scan": scan, "api": response}
+
+
+def panel_url_parts(base_url: str) -> dict[str, Any]:
+    parsed = parse.urlsplit(normalize_base_url(base_url))
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    path = parsed.path or "/"
+    if not path.startswith("/"):
+        path = "/" + path
+    if not path.endswith("/"):
+        path += "/"
+    return {
+        "scheme": parsed.scheme,
+        "host": parsed.hostname or "127.0.0.1",
+        "port": port,
+        "path": path,
+    }
 
 
 def scoped_option(
@@ -635,6 +972,7 @@ def cmd_create_token(args: argparse.Namespace, config: dict[str, Any]) -> int:
 
 
 def cmd_ensure_vless_inbound(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    config = config_with_public_host(args, config, auto_detect=True)
     api = api_from_args(args, config)
     result = ensure_vless_reality_inbound(args, config, api)
     if args.json:
@@ -647,6 +985,7 @@ def cmd_ensure_vless_inbound(args: argparse.Namespace, config: dict[str, Any]) -
     print(f"id: {inbound.get('id')}")
     print(f"port: {inbound.get('port')}")
     print(f"remark: {inbound.get('remark')}")
+    print_public_host_warning(public_host_value(args, config))
     scan = result.get("scan")
     if isinstance(scan, dict):
         verdict = "ok" if scan.get("feasible") else "warning"
@@ -805,8 +1144,10 @@ def cmd_status(args: argparse.Namespace, config: dict[str, Any]) -> int:
 
 
 def cmd_access_info(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    config = config_with_public_host(args, config, auto_detect=True)
     base_url = option_value(args, config, "base_url", "MIRAGE_XUI_BASE_URL")
     parts = panel_url_parts(base_url)
+    public_host = public_host_value(args, config)
     local_port = int(option_value(args, config, "local_port", "MIRAGE_XUI_TUNNEL_LOCAL_PORT", DEFAULT_TUNNEL_LOCAL_PORT))
     ssh_host = option_value(args, config, "ssh_host", "MIRAGE_SSH_HOST", "SERVER_HOST")
     ssh_user = option_value(args, config, "ssh_user", "MIRAGE_SSH_USER", "mirage")
@@ -819,10 +1160,12 @@ def cmd_access_info(args: argparse.Namespace, config: dict[str, Any]) -> int:
     info = {
         "panel_port": parts["port"],
         "web_base_path": parts["path"],
+        "public_host": public_host,
         "local_panel_url": local_panel_url,
         "ssh_tunnel_command": ssh_tunnel_command,
         "docker_commands": {
             "inbounds": "docker compose -f ops/xui/compose.yml run --rm xui-ops inbounds",
+            "public_host": "docker compose -f ops/xui/compose.yml run --rm xui-ops public-host",
             "bootstrap_vpn": "docker compose -f ops/xui/compose.yml run --rm xui-ops bootstrap-vpn --print-links",
             "sync_users": "docker compose -f ops/xui/compose.yml run --rm xui-ops sync-users --print-links",
             "backup_db": "docker compose -f ops/xui/compose.yml run --rm xui-ops backup-db",
@@ -835,6 +1178,7 @@ def cmd_access_info(args: argparse.Namespace, config: dict[str, Any]) -> int:
     print("3x-ui access")
     print("------------")
     print(f"Panel port on VPS: {info['panel_port']}")
+    print(f"Public host for links: {info['public_host'] or 'not detected'}")
     print(f"Local browser URL: {info['local_panel_url']}")
     print("")
     print("PowerShell tunnel command:")
@@ -846,7 +1190,17 @@ def cmd_access_info(args: argparse.Namespace, config: dict[str, Any]) -> int:
     return 0
 
 
+def cmd_public_host(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    public_host = resolve_public_host(args, config, auto_detect=True)
+    if args.json:
+        print_json({"public_host": public_host})
+        return 0
+    print_public_host_warning(public_host)
+    return 0
+
+
 def cmd_bootstrap_vpn(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    config = config_with_public_host(args, config, auto_detect=True)
     api = api_from_args(args, config)
     inbound_result = ensure_vless_reality_inbound(args, config, api)
     inbound = inbound_result.get("inbound") or {}
@@ -862,7 +1216,7 @@ def cmd_bootstrap_vpn(args: argparse.Namespace, config: dict[str, Any]) -> int:
     results = sync_users(client_args, config, api)
 
     if args.json:
-        print_json({"inbound": inbound_result, "clients": results})
+        print_json({"public_host": public_host_value(args, config), "inbound": inbound_result, "clients": results})
         return 0
 
     inbound_state = "created" if inbound_result["changed"] else "exists"
@@ -872,6 +1226,7 @@ def cmd_bootstrap_vpn(args: argparse.Namespace, config: dict[str, Any]) -> int:
     print(f"id: {inbound.get('id')}")
     print(f"port: {inbound.get('port')}")
     print(f"remark: {inbound.get('remark')}")
+    print_public_host_warning(public_host_value(args, config))
     scan = inbound_result.get("scan")
     if isinstance(scan, dict):
         verdict = "ok" if scan.get("feasible") else "warning"
@@ -938,6 +1293,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("inbounds", help="List inbound options.").set_defaults(func=cmd_inbounds)
+
+    sub.add_parser("public-host", help="Print the public host used in generated client links.").set_defaults(func=cmd_public_host)
 
     token = sub.add_parser("create-token", help="Create a 3x-ui API token.")
     token.add_argument("--name", required=True)
