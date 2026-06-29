@@ -1,6 +1,5 @@
 import argparse
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -28,8 +27,13 @@ class XuiApiTests(unittest.TestCase):
 
     def test_public_host_accepts_url_or_hostport(self):
         args = argparse.Namespace(public_host=None)
-        config = {"public_host": "https://vpn.example.com:8443/panel"}
-        self.assertEqual(xui_api.public_host_value(args, config), "vpn.example.com")
+        config = {"public_host": "https://vpn.example.net:8443/panel"}
+        self.assertEqual(xui_api.public_host_value(args, config), "vpn.example.net")
+
+    def test_public_host_rejects_placeholders_and_localhost(self):
+        self.assertIsNone(xui_api.normalize_public_host("SERVER_HOST_OR_DOMAIN"))
+        self.assertIsNone(xui_api.normalize_public_host("http://127.0.0.1:2096/path"))
+        self.assertEqual(xui_api.normalize_public_host("vpn.example.net:443"), "vpn.example.net")
 
     def test_panel_url_parts_keeps_base_path(self):
         parts = xui_api.panel_url_parts("http://127.0.0.1:31453/s-a0000000")
@@ -75,6 +79,33 @@ class XuiApiTests(unittest.TestCase):
         self.assertEqual(reality["privateKey"], "private")
         self.assertEqual(reality["settings"]["publicKey"], "public")
         self.assertEqual(reality["shortIds"], ["ab", "cd12"])
+        self.assertEqual(payload["shareAddrStrategy"], "listen")
+        self.assertEqual(payload["shareAddr"], "")
+
+    def test_build_vless_reality_payload_uses_public_host_for_share_addr(self):
+        args = argparse.Namespace(
+            public_host=None,
+            vless_port=None,
+            vless_remark=None,
+            vless_listen=None,
+            reality_target=None,
+            reality_sni=None,
+            reality_short_ids="ab",
+        )
+        payload = xui_api.build_vless_reality_payload(
+            args,
+            {"public_host": "vpn.example.net"},
+            {"privateKey": "private", "publicKey": "public"},
+        )
+        self.assertEqual(payload["shareAddrStrategy"], "custom")
+        self.assertEqual(payload["shareAddr"], "vpn.example.net")
+
+    def test_scan_reality_target_returns_none_when_endpoint_is_missing(self):
+        class FakeApi:
+            def api(self, _method, _path, _data=None, expect_success=True):
+                raise xui_api.ApiError("scan endpoint unavailable")
+
+        self.assertIsNone(xui_api.scan_reality_target(FakeApi(), "www.microsoft.com:443"))
 
     def test_ensure_client_attaches_existing_client(self):
         class FakeApi:
@@ -98,16 +129,15 @@ class XuiApiTests(unittest.TestCase):
         self.assertEqual(api.attached, {"inboundIds": [2]})
 
     def test_choose_users_path_falls_back_to_example(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            previous_local = xui_api.DEFAULT_USERS_FILE
-            previous_example = xui_api.DEFAULT_USERS_EXAMPLE_FILE
-            try:
-                xui_api.DEFAULT_USERS_FILE = Path(tmp) / "users.local.json"
-                xui_api.DEFAULT_USERS_EXAMPLE_FILE = Path(tmp) / "users.example.json"
-                self.assertEqual(xui_api.choose_users_path(None), xui_api.DEFAULT_USERS_EXAMPLE_FILE)
-            finally:
-                xui_api.DEFAULT_USERS_FILE = previous_local
-                xui_api.DEFAULT_USERS_EXAMPLE_FILE = previous_example
+        previous_local = xui_api.DEFAULT_USERS_FILE
+        previous_example = xui_api.DEFAULT_USERS_EXAMPLE_FILE
+        try:
+            xui_api.DEFAULT_USERS_FILE = Path(".tmp") / "missing-users.local.json"
+            xui_api.DEFAULT_USERS_EXAMPLE_FILE = Path(".tmp") / "users.example.json"
+            self.assertEqual(xui_api.choose_users_path(None), xui_api.DEFAULT_USERS_EXAMPLE_FILE)
+        finally:
+            xui_api.DEFAULT_USERS_FILE = previous_local
+            xui_api.DEFAULT_USERS_EXAMPLE_FILE = previous_example
 
     def test_build_client_payload_uses_vless_defaults(self):
         args = argparse.Namespace(

@@ -61,6 +61,12 @@ py -3 ops/xui/xui_api.py create-token --name mirage-ops
 py -3 ops/xui/xui_api.py inbounds
 ```
 
+Показать публичный host, который будет использоваться в клиентских ссылках:
+
+```bash
+py -3 ops/xui/xui_api.py public-host
+```
+
 Показать URL кабинета, SSH-туннель и частые команды:
 
 ```bash
@@ -133,26 +139,38 @@ py -3 ops/xui/xui_api.py backup-db
    docker compose -f ops/xui/compose.yml run --rm xui-ops inbounds
    ```
 
-4. Выведи URL кабинета, SSH-туннель и частые команды:
+4. Проверь публичный host для клиентских ссылок:
+
+   ```bash
+   docker compose -f ops/xui/compose.yml run --rm xui-ops public-host
+   ```
+
+   Если host определился неверно, явно задай `MIRAGE_XUI_PUBLIC_HOST` в
+   `ops/xui/.env.local` и повтори команду.
+
+5. Выведи URL кабинета, SSH-туннель и частые команды:
 
    ```bash
    docker compose -f ops/xui/compose.yml run --rm xui-ops access-info
    ```
 
-5. Создай VLESS Reality inbound на `443`, синхронизируй `main`, `partner`,
+6. Создай VLESS Reality inbound на `443`, синхронизируй `main`, `partner`,
    `shared` и выведи готовые ссылки:
 
    ```bash
    docker compose -f ops/xui/compose.yml run --rm xui-ops bootstrap-vpn --print-links
    ```
 
-6. Создай отдельного клиента и выведи ссылку:
+   При запуске на VPS команда автоматически определяет public host, прописывает
+   его в inbound как custom share address и переписывает печатаемые ссылки.
+
+7. Создай отдельного клиента и выведи ссылку:
 
    ```bash
    docker compose -f ops/xui/compose.yml run --rm xui-ops ensure-client --email CLIENT_EMAIL --print-links
    ```
 
-7. Синхронизируй клиентов без пересоздания inbound:
+8. Синхронизируй клиентов без пересоздания inbound:
 
    ```bash
    docker compose -f ops/xui/compose.yml run --rm xui-ops sync-users --print-links
@@ -162,7 +180,7 @@ py -3 ops/xui/xui_api.py backup-db
    Если нужен другой список, скопируй `ops/xui/users.example.json` в
    `ops/xui/users.local.json` и измени локальный файл.
 
-8. Скачай backup базы в локальную папку `backups/x-ui`:
+9. Скачай backup базы в локальную папку `backups/x-ui`:
 
    ```bash
    mkdir -p backups/x-ui

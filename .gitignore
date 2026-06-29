@@ -40,6 +40,7 @@ infra/ansible/*.log
 # === Логи и временное ===
 *.log
 tmp/
+.tmp/
 
 # === Python (скрипты/утилиты) ===
 __pycache__/
