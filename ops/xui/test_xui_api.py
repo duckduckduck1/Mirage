@@ -75,8 +75,8 @@ class XuiApiTests(unittest.TestCase):
         self.assertEqual(payload["streamSettings"]["network"], "tcp")
         self.assertEqual(payload["streamSettings"]["security"], "reality")
         reality = payload["streamSettings"]["realitySettings"]
-        self.assertEqual(reality["target"], "www.microsoft.com:443")
-        self.assertEqual(reality["serverNames"], ["www.microsoft.com"])
+        self.assertEqual(reality["target"], "www.amazon.com:443")
+        self.assertEqual(reality["serverNames"], ["www.amazon.com"])
         self.assertEqual(reality["privateKey"], "private")
         self.assertEqual(reality["settings"]["publicKey"], "public")
         self.assertEqual(reality["shortIds"], ["ab", "cd12"])
@@ -106,7 +106,7 @@ class XuiApiTests(unittest.TestCase):
             def api(self, _method, _path, _data=None, expect_success=True):
                 raise xui_api.ApiError("scan endpoint unavailable")
 
-        self.assertIsNone(xui_api.scan_reality_target(FakeApi(), "www.microsoft.com:443"))
+        self.assertIsNone(xui_api.scan_reality_target(FakeApi(), "www.amazon.com:443"))
 
     def test_reset_vless_inbound_deletes_and_recreates(self):
         class FakeApi:
@@ -209,8 +209,8 @@ class XuiApiTests(unittest.TestCase):
                                 "network": "tcp",
                                 "security": "reality",
                                 "realitySettings": {
-                                    "target": "www.microsoft.com:443",
-                                    "serverNames": ["www.microsoft.com"],
+                                    "target": "www.amazon.com:443",
+                                    "serverNames": ["www.amazon.com"],
                                     "privateKey": "secret-private-key",
                                     "shortIds": ["secret-short-id"],
                                     "settings": {
@@ -228,7 +228,7 @@ class XuiApiTests(unittest.TestCase):
         args = argparse.Namespace(vless_port=None, vless_remark=None)
         diagnostics = xui_api.build_vpn_diagnostics(args, {"public_host": "vpn.example.net"}, FakeApi())
         inbound = diagnostics["inbound"]
-        self.assertEqual(inbound["target"], "www.microsoft.com:443")
+        self.assertEqual(inbound["target"], "www.amazon.com:443")
         self.assertEqual(inbound["clients"], ["main"])
         self.assertTrue(inbound["privateKeyPresent"])
         self.assertTrue(inbound["publicKeyPresent"])
@@ -309,8 +309,8 @@ class XuiApiTests(unittest.TestCase):
         self.assertEqual(payload["streamSettings"]["network"], "tcp")
         self.assertEqual(payload["streamSettings"]["security"], "reality")
         reality = payload["streamSettings"]["realitySettings"]
-        self.assertEqual(reality["target"], "www.microsoft.com:443")
-        self.assertEqual(reality["serverNames"], ["www.microsoft.com"])
+        self.assertEqual(reality["target"], "www.amazon.com:443")
+        self.assertEqual(reality["serverNames"], ["www.amazon.com"])
         self.assertEqual(reality["privateKey"], "private")
         self.assertEqual(reality["settings"]["publicKey"], "public")
         self.assertEqual(reality["shortIds"], ["ab", "cd12"])

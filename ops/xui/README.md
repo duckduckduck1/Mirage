@@ -1,16 +1,25 @@
-# 3x-ui API automation
+# xui-ops
 
-`xui_api.py` управляет установленной панелью 3x-ui через официальный HTTP API.
-Скрипт не хранит секреты в репозитории: URL панели, API token и публичный адрес
-передаются через `.env.local`, переменные окружения или аргументы командной
-строки.
+`xui-ops` — CLI для управления 3x-ui через HTTP API. Он используется после
+установки панели на VPS: создаёт VLESS Reality inbound, синхронизирует клиентов,
+печатает ссылки, делает backup и показывает безопасную диагностику.
 
-В Windows запускай команды через `py -3` или через локальный `.venv`. На Linux
-используй `python3`.
+Полный путь установки описан в [гайде развёртывания](../../docs/setup/README.md).
+Ежедневные операции описаны в
+[гайде эксплуатации](../../docs/operations/README.md).
 
-## Локальный venv
+## Где запускается
 
-Из корня репозитория:
+На VPS запускай CLI в Docker-контейнере:
+
+```bash
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops COMMAND
+```
+
+Контейнер использует `network_mode: host`, чтобы видеть панель 3x-ui на
+`127.0.0.1:ПОРТ_ПАНЕЛИ`.
+
+Локально на Windows можно запускать Python-версию для разработки:
 
 ```powershell
 py -3 -m venv .venv
@@ -18,190 +27,151 @@ py -3 -m venv .venv
 .\.venv\Scripts\python.exe ops\xui\xui_api.py --help
 ```
 
-## Базовая настройка
+## Конфигурация
 
-1. Открой SSH-туннель к панели:
-
-   ```powershell
-   ssh -i $HOME\.ssh\mirage_ed25519 -L 2096:127.0.0.1:ПОРТ_ПАНЕЛИ mirage@SERVER_HOST
-   ```
-
-2. Создай `ops/xui/.env.local` по примеру `ops/xui/.env.example`.
-
-3. Укажи в `MIRAGE_XUI_BASE_URL` полный локальный URL панели с web base path:
-
-   ```text
-   MIRAGE_XUI_BASE_URL=http://127.0.0.1:PANEL_PORT/WEB_BASE_PATH
-   MIRAGE_XUI_PUBLIC_HOST=SERVER_HOST_OR_DOMAIN
-   MIRAGE_XUI_API_TOKEN=PASTE_API_TOKEN_HERE
-   MIRAGE_XUI_TUNNEL_LOCAL_PORT=2096
-   MIRAGE_SSH_HOST=SERVER_HOST_OR_DOMAIN
-   MIRAGE_SSH_USER=mirage
-   MIRAGE_SSH_KEY=$HOME\.ssh\mirage_ed25519
-   MIRAGE_XUI_VLESS_PORT=443
-   MIRAGE_XUI_VLESS_REMARK=vless-reality-vision
-   MIRAGE_XUI_REALITY_TARGET=www.microsoft.com:443
-   MIRAGE_XUI_REALITY_SNI=www.microsoft.com
-   ```
-
-Если API token ещё не создан, временно задай `MIRAGE_XUI_USERNAME` и
-`MIRAGE_XUI_PASSWORD`, затем выполни:
+Создай локальный файл:
 
 ```bash
-py -3 ops/xui/xui_api.py create-token --name mirage-ops
+cp ops/xui/.env.example ops/xui/.env.local
 ```
 
-Сохрани выданный token в `.env.local` и убери пароль панели из окружения.
+Минимальный набор:
 
-## Команды
-
-Показать inbound:
-
-```bash
-py -3 ops/xui/xui_api.py inbounds
+```text
+MIRAGE_XUI_BASE_URL=http://127.0.0.1:ПОРТ_ПАНЕЛИ/WEB_BASE_PATH
+MIRAGE_XUI_API_TOKEN=
+MIRAGE_XUI_PUBLIC_HOST=SERVER_HOST_OR_DOMAIN
+MIRAGE_XUI_TUNNEL_LOCAL_PORT=2096
+MIRAGE_SSH_HOST=SERVER_HOST_OR_DOMAIN
+MIRAGE_SSH_USER=mirage
+MIRAGE_SSH_KEY=$HOME\.ssh\mirage_ed25519
+MIRAGE_XUI_VLESS_PORT=443
+MIRAGE_XUI_VLESS_REMARK=vless-reality-vision
+MIRAGE_XUI_REALITY_TARGET=www.amazon.com:443
+MIRAGE_XUI_REALITY_SNI=www.amazon.com
 ```
 
-Показать публичный host, который будет использоваться в клиентских ссылках:
+`WEB_BASE_PATH` смотри на VPS:
 
 ```bash
-py -3 ops/xui/xui_api.py public-host
+sudo /usr/local/x-ui/x-ui setting -show true
+```
+
+Если API token ещё не создан, временно очисти или закомментируй
+`MIRAGE_XUI_API_TOKEN`, задай `MIRAGE_XUI_USERNAME` и `MIRAGE_XUI_PASSWORD`,
+затем выполни:
+
+```bash
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops create-token --name mirage-ops
+```
+
+После получения token удали логин и пароль из `.env.local`.
+
+## Основные команды
+
+Собрать образ:
+
+```bash
+sudo docker compose -f ops/xui/compose.yml build
+```
+
+Показать inbound'ы:
+
+```bash
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops inbounds
+```
+
+Показать публичный host для клиентских ссылок:
+
+```bash
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops public-host
 ```
 
 Показать URL кабинета, SSH-туннель и частые команды:
 
 ```bash
-py -3 ops/xui/xui_api.py access-info
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops access-info
 ```
 
-Создать VLESS Reality inbound на `443`, синхронизировать `main`, `partner`,
-`shared` и вывести готовые ссылки:
+Показать безопасную диагностику VLESS inbound:
 
 ```bash
-py -3 ops/xui/xui_api.py bootstrap-vpn --print-links
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops vpn-diagnose
 ```
 
-Создать клиента и вывести готовую ссылку:
+Создать или пересоздать VPN inbound и профили `main`, `partner`, `shared`:
 
 ```bash
-py -3 ops/xui/xui_api.py ensure-client --email main --print-links
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops bootstrap-vpn \
+  --reset-inbound \
+  --reality-target www.amazon.com:443 \
+  --reality-sni www.amazon.com \
+  --print-links
 ```
 
-Синхронизировать клиентов из локального файла:
+Создать клиента и вывести ссылку:
 
 ```bash
-py -3 ops/xui/xui_api.py sync-users --print-links
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops ensure-client \
+  --email CLIENT_EMAIL \
+  --print-links
 ```
 
-Отключить старого клиента:
+Синхронизировать клиентов из `users.local.json` или дефолтного списка:
 
 ```bash
-py -3 ops/xui/xui_api.py disable-client --email OLD_CLIENT_EMAIL
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops sync-users --print-links
+```
+
+Вывести ссылку клиента:
+
+```bash
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops links --email main
+```
+
+Вывести subscription-ссылки клиента:
+
+```bash
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops sub-links --email main
+```
+
+Отключить клиента:
+
+```bash
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops disable-client --email CLIENT_EMAIL
 ```
 
 Скачать backup базы 3x-ui:
 
 ```bash
-py -3 ops/xui/xui_api.py backup-db
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops backup-db
 ```
 
-`ops/xui/*.local.json`, `.env.local` и `backups/` игнорируются git.
+## Файлы
 
-## Запуск в контейнере на VPS
+| Файл | Назначение |
+|---|---|
+| `.env.example` | пример переменных окружения |
+| `.env.local` | локальные секреты, не коммитится |
+| `users.example.json` | дефолтные профили `main`, `partner`, `shared` |
+| `users.local.json` | локальный список клиентов, не коммитится |
+| `compose.yml` | Docker-запуск CLI на VPS |
+| `open-panel.ps1` | быстрый вход в кабинет с Windows |
+| `xui_api.py` | основной CLI |
 
-На VPS контейнер запускается с host network. Так он видит локальную 3x-ui панель,
-которая слушает `127.0.0.1:ПОРТ_ПАНЕЛИ` на хосте.
+## Быстрый вход в кабинет
 
-1. Собери образ из корня репозитория:
-
-   ```bash
-   docker compose -f ops/xui/compose.yml build
-   ```
-
-2. Создай `ops/xui/.env.local`:
-
-   ```text
-   MIRAGE_XUI_BASE_URL=http://127.0.0.1:ПОРТ_ПАНЕЛИ/WEB_BASE_PATH
-   MIRAGE_XUI_API_TOKEN=PASTE_API_TOKEN_HERE
-   MIRAGE_XUI_PUBLIC_HOST=SERVER_HOST_OR_DOMAIN
-   MIRAGE_XUI_TUNNEL_LOCAL_PORT=2096
-   MIRAGE_SSH_HOST=SERVER_HOST_OR_DOMAIN
-   MIRAGE_SSH_USER=mirage
-   MIRAGE_SSH_KEY=$HOME\.ssh\mirage_ed25519
-   MIRAGE_XUI_VLESS_PORT=443
-   MIRAGE_XUI_VLESS_REMARK=vless-reality-vision
-   MIRAGE_XUI_REALITY_TARGET=www.microsoft.com:443
-   MIRAGE_XUI_REALITY_SNI=www.microsoft.com
-   ```
-
-3. Проверь доступ к панели:
-
-   ```bash
-   docker compose -f ops/xui/compose.yml run --rm xui-ops inbounds
-   ```
-
-4. Проверь публичный host для клиентских ссылок:
-
-   ```bash
-   docker compose -f ops/xui/compose.yml run --rm xui-ops public-host
-   ```
-
-   Если host определился неверно, явно задай `MIRAGE_XUI_PUBLIC_HOST` в
-   `ops/xui/.env.local` и повтори команду.
-
-5. Выведи URL кабинета, SSH-туннель и частые команды:
-
-   ```bash
-   docker compose -f ops/xui/compose.yml run --rm xui-ops access-info
-   ```
-
-6. Создай VLESS Reality inbound на `443`, синхронизируй `main`, `partner`,
-   `shared` и выведи готовые ссылки:
-
-   ```bash
-   docker compose -f ops/xui/compose.yml run --rm xui-ops bootstrap-vpn --print-links
-   ```
-
-   При запуске на VPS команда автоматически определяет public host, прописывает
-   его в inbound как custom share address и переписывает печатаемые ссылки.
-
-7. Создай отдельного клиента и выведи ссылку:
-
-   ```bash
-   docker compose -f ops/xui/compose.yml run --rm xui-ops ensure-client --email CLIENT_EMAIL --print-links
-   ```
-
-8. Синхронизируй клиентов без пересоздания inbound:
-
-   ```bash
-   docker compose -f ops/xui/compose.yml run --rm xui-ops sync-users --print-links
-   ```
-
-   По умолчанию будут созданы профили `main`, `partner` и `shared`.
-   Если нужен другой список, скопируй `ops/xui/users.example.json` в
-   `ops/xui/users.local.json` и измени локальный файл.
-
-9. Скачай backup базы в локальную папку `backups/x-ui`:
-
-   ```bash
-   mkdir -p backups/x-ui
-   docker compose -f ops/xui/compose.yml run --rm xui-ops backup-db
-   ```
-
-## Быстрый вход в кабинет с Windows
-
-Скрипт `open-panel.ps1` запускается на локальном ПК. Он подключается к VPS по
-SSH, получает `access-info` из контейнера, открывает SSH-туннель и запускает
-браузер с правильным URL кабинета.
+С Windows:
 
 ```powershell
 .\ops\xui\open-panel.ps1 -ServerHost SERVER_HOST_OR_DOMAIN
 ```
 
-Если SSH-ключ лежит не в `$HOME\.ssh\mirage_ed25519`, передай путь явно:
+Скрипт получает `access-info` с VPS, открывает SSH-туннель и запускает браузер.
+Не закрывай окно туннеля, пока работаешь с кабинетом.
 
-```powershell
-.\ops\xui\open-panel.ps1 -ServerHost SERVER_HOST_OR_DOMAIN -KeyPath C:\PATH\TO\KEY
-```
+## Безопасность
 
-Если ключ защищён passphrase, введи его в открывшемся окне туннеля. Не закрывай
-это окно, пока работаешь с кабинетом.
+`vpn-diagnose` не печатает клиентские ссылки, UUID, short IDs и ключи. Остальные
+команды, которые выводят ссылки, считай секретными. Не копируй их в issue, PR,
+документацию или чат.

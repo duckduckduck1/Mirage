@@ -1,9 +1,9 @@
 # Production-checkpoint VLESS Reality
 
-Runbook фиксирует текущее рабочее состояние Mirage после ротации секретов панели
-и клиента. На этом этапе production-схема использует только `VLESS Reality` на
-`443/tcp`. Резервные протоколы и публичные subscription-ссылки добавляются
-отдельными этапами после проверки.
+Runbook фиксирует рабочее состояние Mirage после настройки 3x-ui и `xui-ops`.
+На этом этапе production-схема использует только `VLESS Reality` на `443/tcp`.
+Резервные протоколы и публичные subscription-ссылки добавляются отдельными
+этапами после проверки.
 
 Не добавляй в git реальные IP, `vless://`-ссылки, UUID, пароли, приватные ключи
 Reality, `WEB_BASE_PATH`, subscription path и backup-файлы.
@@ -27,6 +27,8 @@ VPS
 На VPS выполни:
 
 ```bash
+cd /home/mirage/projects/Mirage
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops vpn-diagnose
 sudo ss -tlnp | grep -E ':443|:8388|:ПОРТ_ПАНЕЛИ'
 sudo ufw status numbered
 systemctl status x-ui --no-pager
@@ -35,6 +37,7 @@ systemctl status x-ui --no-pager
 Ожидаемые признаки:
 
 ```text
+warnings: none
 127.0.0.1:ПОРТ_ПАНЕЛИ     x-ui
 *:443                     xray-linux-amd64
 ```
@@ -51,10 +54,16 @@ Shadowsocks не входит в рабочую схему.
 
 ## Проверка панели
 
-С локальной машины открой SSH-туннель:
+С локальной Windows-машины можно открыть кабинет скриптом:
 
 ```powershell
-ssh -N -i $HOME\.ssh\mirage_ed25519 -L 2096:127.0.0.1:ПОРТ_ПАНЕЛИ mirage@SERVER_IP
+.\ops\xui\open-panel.ps1 -ServerHost SERVER_HOST_OR_DOMAIN
+```
+
+Или открой SSH-туннель вручную:
+
+```powershell
+ssh -N -i $HOME\.ssh\mirage_ed25519 -L 2096:127.0.0.1:ПОРТ_ПАНЕЛИ mirage@SERVER_HOST_OR_DOMAIN
 ```
 
 Открой панель:
@@ -73,12 +82,18 @@ http://localhost:2096/WEB_BASE_PATH
 
 ## Проверка клиента VLESS
 
+На VPS проверь API-состояние:
+
+```bash
+cd /home/mirage/projects/Mirage
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops vpn-diagnose
+```
+
 В 3x-ui открой **Входящие** → `vless-reality-vision`.
 
 Проверь:
 
-- активный клиент использует новый UUID после ротации;
-- старый клиент отключён или удалён;
+- клиенты `main`, `partner`, `shared` существуют;
 - `flow` у активного клиента — `xtls-rprx-vision`;
 - inbound включён;
 - порт inbound — `443`.
@@ -88,7 +103,15 @@ http://localhost:2096/WEB_BASE_PATH
 
 ## Финальный бэкап
 
-После проверки сделай backup/export 3x-ui и сохрани его вне git:
+После проверки сделай backup 3x-ui и сохрани его вне git:
+
+```bash
+cd /home/mirage/projects/Mirage
+mkdir -p backups/x-ui
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops backup-db
+```
+
+Для внешней копии используй имя:
 
 ```text
 BACKUP_LOCAL_DIR\mirage-xui-YYYYMMDD-vless-production-checkpoint.db
@@ -104,7 +127,7 @@ BACKUP_LOCAL_DIR\mirage-xui-YYYYMMDD-vless-production-checkpoint.db
 - `8388/tcp` закрыт.
 - Домен и публичные subscription-ссылки отложены.
 - Telegram-прокси `mtg` отложен.
-- Автоматизация 3x-ui/Xray через Ansible отложена.
+- Автоматизация установки 3x-ui/Xray через Ansible отложена.
 
 ## Чек-лист
 
@@ -112,9 +135,10 @@ BACKUP_LOCAL_DIR\mirage-xui-YYYYMMDD-vless-production-checkpoint.db
 - [ ] `ss` показывает `127.0.0.1:ПОРТ_ПАНЕЛИ`.
 - [ ] `ss` показывает `*:443`.
 - [ ] `ss` не показывает `:8388`.
+- [ ] `vpn-diagnose` не показывает предупреждений.
 - [ ] Панель открывается только через SSH-туннель.
 - [ ] Пароль панели сменён и сохранён вне git.
 - [ ] Subscription path отличается от `/sub/`.
-- [ ] Активный VLESS-клиент ротирован и работает.
-- [ ] Старый VLESS-клиент отключён или удалён.
+- [ ] Профили `main`, `partner`, `shared` созданы.
+- [ ] Активный VLESS-клиент работает.
 - [ ] Финальный backup сохранён вне git.
