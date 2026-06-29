@@ -1,89 +1,98 @@
 # Mirage
 
-> Самостоятельно управляемый VPN + Telegram-прокси с маскировкой трафика,
-> подписками и быстрым переносом между VPS.
+Mirage — репозиторий для развёртывания и эксплуатации собственного VPN/прокси
+стека на VPS. Цель проекта — быстро поднимать рабочий сервер, управлять доступом
+через 3x-ui API, выпускать отдельные профили для участников и сохранять
+возможность переезда на новый VPS при блокировке IP.
 
-**Статус:** 🚧 активная разработка. Готов production-checkpoint: безопасный
-Ansible-bootstrap VPS, 3x-ui/Xray с VLESS Reality на `443/tcp`, закрытая за
-SSH-туннелем панель, ротированный VLESS-клиент, сменённый пароль панели и
-backup-процедура. Публично открыты только `22/tcp` и `443/tcp`. Следующие этапы —
-домен и subscription-ссылки, выбор резервного протокола, Telegram-прокси `mtg`,
-API-автоматизация 3x-ui и автоматизация сервисов через Ansible.
+## Текущий статус
 
-## Что это
+Готов и проверен VPN-этап:
 
-Mirage — это инфраструктурный проект для управляемого доступа через арендованный
-VPS:
+- базовый bootstrap VPS через Ansible: пользователь `mirage`, SSH по ключу,
+  `sudo`, `ufw`, `fail2ban`, SSH-hardening;
+- 3x-ui/Xray на VPS;
+- VLESS Reality на `443/tcp`;
+- панель 3x-ui закрыта на `127.0.0.1` и открывается только через SSH-туннель;
+- `xui-ops` управляет 3x-ui через API из Docker-контейнера;
+- автоматизировано создание inbound и профилей `main`, `partner`, `shared`;
+- добавлены команды диагностики, бэкапа и безопасного пересоздания VPN inbound.
 
-- **VPN** — Xray-core (VLESS + Reality + XTLS-Vision) под панелью 3x-ui.
-  Соединение для систем фильтрации (DPI) неотличимо от обычного захода на
-  разрешённый сайт.
-- **Telegram-прокси** — `mtg` (MTProto, режим FakeTLS) с маскировкой под
-  выбранный разрешённый домен.
+Следующий крупный этап — Telegram MTProxy/FakeTLS. Он будет оформлен отдельным
+гайдом после реализации.
 
-Резервный протокол выбирается отдельным этапом. Shadowsocks-2022 описан как
-диагностический вариант, но не входит в текущую production-схему.
+## Что входит в проект
 
-## Ключевая идея: IP как расходник
-
-Блокировки происходят регулярно, поэтому проект спроектирован так, чтобы **смена
-сервера или IP не требовала ручной перенастройки клиентов**:
-
-- раздаём **subscription-ссылки** как единый источник правды, а не отдельные
-  конфиги для каждого клиента;
-- адрес подписки привязан к **домену**, а не к IP;
-- базовый доступ и защита сервера уже кодифицированы в **Ansible**; установка
-  3x-ui/Xray пока зафиксирована runbook'ом и будет автоматизироваться позже;
-- база панели и конфиги должны попадать в регулярный бэкап.
-
-Подробнее — в [документации по архитектуре](docs/architecture.md).
-
-## Стек
-
-| Слой | Технологии |
+| Часть | Назначение |
 |---|---|
-| Сервер | Ubuntu/Debian VPS, `systemd`, `ufw`, `fail2ban` |
-| VPN | Xray-core (VLESS + Reality + Vision), панель 3x-ui |
-| Telegram | `mtg` (MTProto FakeTLS) в Docker |
-| Инфраструктура | Ansible-bootstrap (готово), 3x-ui runbook (готово), Terraform и Docker Compose (план) |
-| Наблюдаемость (план) | Prometheus, Grafana, Alertmanager |
+| `infra/ansible` | Первый bootstrap свежего VPS и базовая защита |
+| `ops/xui` | CLI и Docker-обёртка для управления 3x-ui через API |
+| `docs/setup` | Пошаговое развёртывание VPN на VPS |
+| `docs/operations` | Работа с уже поднятым VPN: ссылки, клиенты, бэкапы, диагностика |
+| `docs/runbooks` | Детальные процедуры для отдельных операций |
+| `docs/adr` | Архитектурные решения |
 
-## Структура репозитория
+## Основная идея
 
-```
-.
-├── README.md            — этот файл
-├── CONTRIBUTING.md      — правила веток, коммитов и PR
-├── docs/
-│   ├── setup.md         — установка и первичная настройка
-│   ├── architecture.md  — архитектура и дизайн миграции
-│   ├── style-guide.md   — стиль документации (на базе Google dev docs style)
-│   ├── adr/             — Architecture Decision Records (журнал решений)
-│   └── runbooks/        — эксплуатационные инструкции
-├── infra/
-│   └── ansible/         — первый bootstrap VPS и базовая защита
-├── ops/
-│   └── xui/             — CLI для управления 3x-ui через API
-└── .github/             — шаблоны PR и задач
-```
+IP сервера считается расходником. Если VPS попал под блокировку, проект должен
+позволять быстро поднять новый сервер, восстановить конфигурацию и перевести
+клиентов без ручной пересборки каждого профиля.
+
+Для этого Mirage использует:
+
+- воспроизводимый bootstrap сервера;
+- 3x-ui как панель управления клиентами и подписками;
+- `xui-ops` как автоматизированный слой поверх API панели;
+- отдельные клиентские профили по ролям: `main`, `partner`, `shared`;
+- бэкапы базы 3x-ui;
+- домен и subscription-ссылки как следующий шаг для более удобной миграции.
+
+Reality target/SNI маскирует TLS-профиль соединения, но не защищает сам IP от
+блокировки. Поэтому документация отдельно описывает бэкапы, миграцию и будущую
+модель с доменом.
+
+## Быстрый старт по документации
+
+1. Разверни VPN на новом VPS:
+   [docs/setup/README.md](docs/setup/README.md).
+2. Работай с поднятым сервисом:
+   [docs/operations/README.md](docs/operations/README.md).
+3. Посмотри архитектурную модель:
+   [docs/architecture.md](docs/architecture.md).
+4. Перед изменениями делай бэкап:
+   [docs/runbooks/backup-xui.md](docs/runbooks/backup-xui.md).
+5. Для переезда на новый VPS используй:
+   [docs/runbooks/migrate-vps.md](docs/runbooks/migrate-vps.md).
+
+## Безопасность секретов
+
+Не добавляй в git:
+
+- реальные IP и домены;
+- `vless://`, `ss://` и subscription-ссылки;
+- UUID клиентов, short IDs, Reality private key;
+- пароль панели, API token, `WEB_BASE_PATH`;
+- `.env.local`, `users.local.json`, backup-файлы и дампы базы.
+
+Локальные секреты храни в менеджере паролей. Папка `backups/` и локальные файлы
+`ops/xui/*.local.json`, `ops/xui/.env.local` игнорируются git.
 
 ## Документация
 
+- [Установка VPN на VPS](docs/setup/README.md)
+- [Эксплуатация VPN](docs/operations/README.md)
 - [Архитектура](docs/architecture.md)
-- [Установка Mirage](docs/setup.md)
-- [Как контрибьютить (ветки, коммиты, PR)](CONTRIBUTING.md)
+- [Технический справочник xui-ops](ops/xui/README.md)
+- [Bootstrap VPS через Ansible](docs/runbooks/bootstrap-vps-ansible.md)
+- [Бэкап 3x-ui](docs/runbooks/backup-xui.md)
+- [Миграция на новый VPS](docs/runbooks/migrate-vps.md)
+- [Домен и subscription-ссылки](docs/runbooks/domain-and-subscriptions.md)
+- [Production-checkpoint VLESS Reality](docs/runbooks/vless-production-checkpoint.md)
+- [Fallback: ручная настройка 3x-ui](docs/runbooks/setup-xui-vless-reality.md)
+- [Fallback: проверка Shadowsocks-2022](docs/runbooks/setup-shadowsocks-2022.md)
+- [Правила работы с проектом](CONTRIBUTING.md)
 - [Стиль документации](docs/style-guide.md)
-- [Журнал архитектурных решений (ADR)](docs/adr/)
-- [Runbook: bootstrap VPS через Ansible](docs/runbooks/bootstrap-vps-ansible.md)
-- [Runbook: ручная настройка 3x-ui и VLESS Reality](docs/runbooks/setup-xui-vless-reality.md)
-- [Runbook: production-checkpoint VLESS Reality](docs/runbooks/vless-production-checkpoint.md)
-- [Runbook: проверка Shadowsocks-2022](docs/runbooks/setup-shadowsocks-2022.md)
-- [Runbook: домен и subscription-ссылки](docs/runbooks/domain-and-subscriptions.md)
-- [Runbook: бэкап 3x-ui](docs/runbooks/backup-xui.md)
-- [Runbook: миграция на новый VPS](docs/runbooks/migrate-vps.md)
 
 ## Лицензия
 
 [MIT](LICENSE).
-
-Используй проект ответственно и учитывай требования своей юрисдикции.

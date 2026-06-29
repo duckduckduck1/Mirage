@@ -58,12 +58,20 @@ ansible-playbook site.yml -e enable_ssh_hardening=true --tags hardening
 
 ## Установка сервисов
 
-Установи 3x-ui/Xray по runbook:
+Установи 3x-ui/Xray, Docker и `xui-ops` по основному гайду:
 
-- [Ручная настройка 3x-ui и VLESS Reality](setup-xui-vless-reality.md)
+- [Установка VPN на VPS](../setup/README.md)
 
-Пока Ansible-роль для 3x-ui не готова, этот шаг выполняется вручную. После
-автоматизации замени ручной шаг запуском соответствующего playbook.
+После установки проверь API-доступ:
+
+```bash
+cd /home/mirage/projects/Mirage
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops inbounds
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops vpn-diagnose
+```
+
+Если Ansible-роль для 3x-ui будет добавлена позже, замени этот шаг запуском
+соответствующего playbook.
 
 ## Восстановление 3x-ui
 
@@ -73,6 +81,8 @@ ansible-playbook site.yml -e enable_ssh_hardening=true --tags hardening
 Проверь:
 
 ```bash
+cd /home/mirage/projects/Mirage
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops vpn-diagnose
 sudo ss -tlnp | grep -E ':443|:8388|:ПОРТ_ПАНЕЛИ'
 sudo ufw status
 systemctl status x-ui --no-pager
@@ -85,6 +95,7 @@ systemctl status x-ui --no-pager
 127.0.0.1:ПОРТ_ПАНЕЛИ     x-ui
 443/tcp ALLOW
 x-ui active (running)
+warnings: none
 ```
 
 Если резервный протокол не входит в текущую production-схему, `8388/tcp` не
