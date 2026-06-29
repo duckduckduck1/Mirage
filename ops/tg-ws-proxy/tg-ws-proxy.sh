@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)"
 ENV_FILE="${MIRAGE_TG_WS_ENV:-$SCRIPT_DIR/.env.local}"
 ENV_EXAMPLE="$SCRIPT_DIR/.env.example"
 COMPOSE_FILE="$SCRIPT_DIR/compose.yml"
+DEFAULT_DC_IPS="1:149.154.175.53,2:149.154.167.220,3:149.154.175.100,4:149.154.167.220,5:91.108.56.130"
 
 usage() {
   cat <<'USAGE'
@@ -15,6 +16,7 @@ Usage:
   tg-ws-proxy.sh up
   tg-ws-proxy.sh down
   tg-ws-proxy.sh restart
+  tg-ws-proxy.sh dc-map [DC_IPS]
   tg-ws-proxy.sh firewall
   tg-ws-proxy.sh status
   tg-ws-proxy.sh logs
@@ -28,6 +30,7 @@ Commands:
   up            Start container.
   down          Stop container.
   restart       Recreate container.
+  dc-map        Set direct Telegram DC map in .env.local.
   firewall      Allow public TCP port in UFW.
   status        Show Docker Compose service status.
   logs          Follow container logs.
@@ -196,6 +199,13 @@ cmd_restart() {
   compose_cmd up -d --force-recreate
 }
 
+cmd_dc_map() {
+  copy_env_if_needed
+  local dc_ips="${1:-$DEFAULT_DC_IPS}"
+  set_env_var TG_WS_DC_IPS "$dc_ips"
+  printf 'TG_WS_DC_IPS=%s\n' "$dc_ips"
+}
+
 cmd_firewall() {
   load_env
   local port="${TG_WS_PUBLIC_PORT:-9443}"
@@ -285,6 +295,10 @@ main() {
       ;;
     restart)
       cmd_restart
+      ;;
+    dc-map)
+      shift
+      cmd_dc_map "${1:-}"
       ;;
     firewall)
       cmd_firewall
