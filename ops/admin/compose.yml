@@ -1,0 +1,16 @@
+services:
+  mirage-admin:
+    build:
+      context: ../..
+      dockerfile: ops/admin/Dockerfile
+    image: mirage-admin:local
+    container_name: mirage-admin
+    network_mode: host
+    restart: unless-stopped
+    env_file:
+      - ../xui/.env.local
+      - .env.local
+    environment:
+      MIRAGE_ADMIN_BACKUP_DIR: /data/backups
+    volumes:
+      - ${MIRAGE_ADMIN_BACKUP_DIR_HOST:-../../backups}:/data/backups
