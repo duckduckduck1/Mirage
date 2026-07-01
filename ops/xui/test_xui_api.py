@@ -1,4 +1,6 @@
 import argparse
+import contextlib
+import io
 import sys
 import tempfile
 import unittest
@@ -374,6 +376,114 @@ class XuiApiTests(unittest.TestCase):
         self.assertEqual(payload["security"], "auto")
         self.assertEqual(payload["totalGB"], 0)
         self.assertTrue(payload["enable"])
+
+    def test_parse_vless_reality_link_extracts_manual_fields(self):
+        link = (
+            "vless://user-uuid@vpn.example.net:443?"
+            "type=tcp&security=reality&flow=xtls-rprx-vision&sni=www.amazon.com"
+            "&fp=chrome&pbk=public-key&sid=abcd&spx=%2F&encryption=none#main"
+        )
+
+        parsed = xui_api.parse_vless_reality_link(link)
+
+        self.assertEqual(parsed["warnings"], [])
+        self.assertEqual(parsed["manual"]["address"], "vpn.example.net")
+        self.assertEqual(parsed["manual"]["port"], 443)
+        self.assertEqual(parsed["manual"]["uuid"], "user-uuid")
+        self.assertEqual(parsed["manual"]["network"], "tcp")
+        self.assertEqual(parsed["manual"]["security"], "reality")
+        self.assertEqual(parsed["manual"]["flow"], "xtls-rprx-vision")
+        self.assertEqual(parsed["manual"]["sni"], "www.amazon.com")
+        self.assertEqual(parsed["manual"]["fingerprint"], "chrome")
+        self.assertEqual(parsed["manual"]["publicKey"], "public-key")
+        self.assertEqual(parsed["manual"]["shortId"], "abcd")
+        self.assertEqual(parsed["manual"]["spiderX"], "/")
+        self.assertEqual(parsed["manual"]["remark"], "main")
+
+    def test_parse_vless_reality_link_warns_on_missing_reality_fields(self):
+        link = "vless://user-uuid@vpn.example.net:443?type=tcp&security=reality#main"
+
+        parsed = xui_api.parse_vless_reality_link(link)
+
+        self.assertIn("flow", parsed["warnings"][0])
+        self.assertIn("pbk/publicKey", parsed["warnings"][0])
+        self.assertIn("sid/shortId", parsed["warnings"][0])
+        self.assertIn("fp/fingerprint", parsed["warnings"][0])
+
+    def test_build_subscription_bundle_reads_links_without_mutating_api(self):
+        link = (
+            "vless://user-uuid@panel.local:443?"
+            "type=tcp&security=reality&flow=xtls-rprx-vision&sni=www.amazon.com"
+            "&fp=chrome&pbk=public-key&sid=abcd&spx=%2F#main"
+        )
+
+        class FakeApi:
+            def __init__(self):
+                self.calls = []
+
+            def api(self, method, path, data=None, expect_success=True):
+                self.calls.append((method, path, data))
+                if method != "GET":
+                    raise AssertionError("subscriptions must not mutate API state")
+                if path == "/panel/api/clients/links/main":
+                    return {"success": True, "obj": [link]}
+                if path == "/panel/api/clients/get/main":
+                    return {"success": True, "obj": {"client": {"subId": "sub123"}}}
+                if path == "/panel/api/clients/subLinks/sub123":
+                    return {"success": True, "obj": [link]}
+                raise AssertionError(path)
+
+        api = FakeApi()
+        bundle = xui_api.build_subscription_bundle(api, "main", "vpn.example.net")
+
+        self.assertEqual(bundle["email"], "main")
+        self.assertEqual(bundle["raw"]["subId"], "sub123")
+        self.assertIn("vpn.example.net", bundle["hiddify"]["directLinks"][0])
+        self.assertEqual(bundle["v2raytun"]["manual"]["address"], "vpn.example.net")
+        self.assertEqual(bundle["diagnostics"]["warnings"], [])
+        self.assertTrue(all(method == "GET" for method, _path, _data in api.calls))
+
+    def test_build_subscription_bundle_keeps_direct_link_when_sub_links_fail(self):
+        link = (
+            "vless://user-uuid@panel.local:443?"
+            "type=tcp&security=reality&flow=xtls-rprx-vision&sni=www.amazon.com"
+            "&fp=chrome&pbk=public-key&sid=abcd&spx=%2F#main"
+        )
+
+        class FakeApi:
+            def api(self, method, path, data=None, expect_success=True):
+                if path == "/panel/api/clients/links/main":
+                    return {"success": True, "obj": [link]}
+                if path == "/panel/api/clients/get/main":
+                    return {"success": True, "obj": {"client": {"subId": "sub123"}}}
+                if path == "/panel/api/clients/subLinks/sub123":
+                    raise xui_api.ApiError("temporary unavailable")
+                raise AssertionError(path)
+
+        bundle = xui_api.build_subscription_bundle(FakeApi(), "main", "vpn.example.net")
+
+        self.assertEqual(bundle["hiddify"]["directLinks"][0].split("@", 1)[1].split(":", 1)[0], "vpn.example.net")
+        self.assertEqual(bundle["hiddify"]["subscriptionDerivedLinks"], [])
+        self.assertIn("temporary unavailable", bundle["diagnostics"]["warnings"][0])
+
+    def test_print_subscription_bundle_contains_app_sections(self):
+        bundle = {
+            "email": "main",
+            "hiddify": {"directLinks": ["vless://example"], "subscriptionDerivedLinks": []},
+            "v2raytun": {"manual": {"address": "vpn.example.net"}, "sourceLink": "vless://example"},
+            "raw": {"subId": "sub123", "directLinks": ["vless://example"], "subscriptionDerivedLinks": []},
+            "diagnostics": {"warnings": ["Subscription-derived links are not available from 3x-ui."]},
+        }
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            xui_api.print_subscription_bundle(bundle, "all")
+
+        text = output.getvalue()
+        self.assertIn("Hiddify", text)
+        self.assertIn("V2RayTun manual fields", text)
+        self.assertIn("Raw links", text)
+        self.assertIn("Diagnostics", text)
 
 
 if __name__ == "__main__":
