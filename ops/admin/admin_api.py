@@ -12,14 +12,15 @@ import ipaddress
 import json
 import os
 import re
+import shutil
 import socket
 import sys
 import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
-from urllib import parse
+from typing import Any, Callable
+from urllib import parse, request as urlrequest
 
 CURRENT_DIR = Path(__file__).resolve().parent
 XUI_DIR = CURRENT_DIR.parent / "xui"
@@ -34,6 +35,10 @@ BACKUP_RE = re.compile(r"^x-ui-\d{8}-\d{6}(?:-\d{3})?\.db$")
 DEFAULT_ADMIN_HOST = "127.0.0.1"
 DEFAULT_ADMIN_PORT = 8090
 DEFAULT_BACKUP_DIR = Path("/data/backups")
+DEFAULT_ALERT_INTERVAL_SECONDS = 60
+DEFAULT_ALERT_STATE_FILE = Path("/data/alerts/state.json")
+DEFAULT_ALERT_BACKUP_MAX_AGE_HOURS = 36
+DEFAULT_ALERT_DISK_FREE_MIN_PERCENT = 10
 STATIC_DIR = CURRENT_DIR / "static"
 CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -69,6 +74,26 @@ def is_loopback_host(host: str) -> bool:
         return ipaddress.ip_address(normalized).is_loopback
     except ValueError:
         return False
+
+
+def env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_int(name: str, default: int, minimum: int = 0) -> int:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if value < minimum:
+        raise ValueError(f"{name} must be greater than or equal to {minimum}")
+    return value
 
 
 def load_runtime_env() -> None:
@@ -144,11 +169,13 @@ class AdminService:
         api: xui_api.XuiClient,
         config: dict[str, Any] | None = None,
         backup_dir: Path = DEFAULT_BACKUP_DIR,
+        notifier_factory: Callable[[str, str], "TelegramNotifier"] | None = None,
     ) -> None:
         self.api = api
         self.config = config or {}
         self.args = env_namespace()
         self.backup_dir = backup_dir
+        self.notifier_factory = notifier_factory or TelegramNotifier
 
     def public_host(self) -> str | None:
         return xui_api.public_host_value(self.args, self.config)
@@ -309,6 +336,221 @@ class AdminService:
             raise AdminError(HTTPStatus.NOT_FOUND, "backup was not found")
         return path
 
+    def alert_status(self) -> dict[str, Any]:
+        config = alert_config()
+        state = load_alert_state(config["stateFile"])
+        return {
+            "enabled": config["enabled"],
+            "configured": config["configured"],
+            "intervalSeconds": config["intervalSeconds"],
+            "maxBackupAgeHours": config["maxBackupAgeHours"],
+            "minDiskFreePercent": config["minDiskFreePercent"],
+            "state": {
+                "status": state.get("status"),
+                "updatedAt": state.get("updatedAt"),
+            },
+            "health": alert_health(self, config["maxBackupAgeHours"], config["minDiskFreePercent"]),
+        }
+
+    def send_test_alert(self) -> dict[str, Any]:
+        config = alert_config()
+        if not config["configured"]:
+            raise AdminError(HTTPStatus.BAD_REQUEST, "telegram alerts are not configured")
+        notifier = self.notifier_factory(config["botToken"], config["chatId"])
+        notifier.send("Mirage VPN: тестовое уведомление")
+        return {"sent": True}
+
+
+class TelegramNotifier:
+    def __init__(self, bot_token: str, chat_id: str, timeout: int = 10) -> None:
+        self.bot_token = bot_token
+        self.chat_id = chat_id
+        self.timeout = timeout
+
+    def send(self, text: str) -> None:
+        endpoint = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+        data = parse.urlencode(
+            {
+                "chat_id": self.chat_id,
+                "text": text,
+                "disable_web_page_preview": "true",
+            }
+        ).encode("utf-8")
+        request_obj = urlrequest.Request(
+            endpoint,
+            data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with urlrequest.urlopen(request_obj, timeout=self.timeout) as response:
+            if response.status >= 400:
+                raise RuntimeError(f"telegram returned HTTP {response.status}")
+
+
+def backup_freshness_check(backup_dir: Path, max_age_hours: int) -> dict[str, Any]:
+    try:
+        backups = [path for path in backup_dir.glob("x-ui-*.db") if BACKUP_RE.fullmatch(path.name)]
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not backups:
+        return {"ok": False, "error": "no backup files found", "maxAgeHours": max_age_hours}
+    latest = max(backups, key=lambda path: path.stat().st_mtime)
+    age_seconds = max(0, int(time.time() - latest.stat().st_mtime))
+    max_age_seconds = max_age_hours * 3600
+    payload = {
+        "ok": age_seconds <= max_age_seconds,
+        "latest": latest.name,
+        "ageSeconds": age_seconds,
+        "maxAgeHours": max_age_hours,
+    }
+    if not payload["ok"]:
+        payload["error"] = f"latest backup is older than {max_age_hours}h"
+    return payload
+
+
+def alert_config() -> dict[str, Any]:
+    token = os.environ.get("MIRAGE_ALERT_TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.environ.get("MIRAGE_ALERT_TELEGRAM_CHAT_ID", "").strip()
+    configured = bool(token and chat_id)
+    return {
+        "enabled": env_flag("MIRAGE_ALERTS_ENABLED", configured),
+        "configured": configured,
+        "botToken": token,
+        "chatId": chat_id,
+        "intervalSeconds": env_int("MIRAGE_ALERT_INTERVAL_SECONDS", DEFAULT_ALERT_INTERVAL_SECONDS, minimum=5),
+        "maxBackupAgeHours": env_int(
+            "MIRAGE_ALERT_BACKUP_MAX_AGE_HOURS",
+            DEFAULT_ALERT_BACKUP_MAX_AGE_HOURS,
+            minimum=0,
+        ),
+        "minDiskFreePercent": env_int(
+            "MIRAGE_ALERT_DISK_FREE_MIN_PERCENT",
+            DEFAULT_ALERT_DISK_FREE_MIN_PERCENT,
+            minimum=0,
+        ),
+        "stateFile": Path(os.environ.get("MIRAGE_ALERT_STATE_FILE", str(DEFAULT_ALERT_STATE_FILE))),
+    }
+
+
+def disk_space_check(path: Path, min_free_percent: int) -> dict[str, Any]:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        usage = shutil.disk_usage(path)
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+    free_percent = int((usage.free / usage.total) * 100) if usage.total else 0
+    payload = {
+        "ok": free_percent >= min_free_percent,
+        "freePercent": free_percent,
+        "minFreePercent": min_free_percent,
+    }
+    if not payload["ok"]:
+        payload["error"] = f"free disk space is below {min_free_percent}%"
+    return payload
+
+
+def alert_health(
+    service: AdminService,
+    max_backup_age_hours: int,
+    min_disk_free_percent: int = DEFAULT_ALERT_DISK_FREE_MIN_PERCENT,
+) -> dict[str, Any]:
+    health = service.health()
+    checks = dict(health.get("checks") or {})
+    if max_backup_age_hours > 0:
+        checks["backupFreshness"] = backup_freshness_check(service.backup_dir, max_backup_age_hours)
+    if min_disk_free_percent > 0:
+        checks["diskFree"] = disk_space_check(service.backup_dir, min_disk_free_percent)
+    return {
+        "status": "ok" if all(item.get("ok") for item in checks.values()) else "degraded",
+        "checks": checks,
+    }
+
+
+def alert_fingerprint(health: dict[str, Any]) -> str:
+    failed = sorted(name for name, item in (health.get("checks") or {}).items() if not item.get("ok"))
+    return "ok" if not failed else "degraded:" + ",".join(failed)
+
+
+def short_error(item: dict[str, Any]) -> str:
+    error = str(item.get("error") or "")
+    if len(error) > 160:
+        return error[:157] + "..."
+    return error
+
+
+def format_alert_text(health: dict[str, Any]) -> str:
+    status = health.get("status")
+    title = "Mirage VPN: восстановлен" if status == "ok" else "Mirage VPN: деградация"
+    lines = [title]
+    for name, item in sorted((health.get("checks") or {}).items()):
+        marker = "OK" if item.get("ok") else "FAIL"
+        line = f"[{marker}] {name}"
+        if not item.get("ok") and item.get("error"):
+            line += f": {short_error(item)}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def load_alert_state(path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_alert_state(path: Path, state: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.chmod(0o600)
+
+
+def alert_tick(
+    service: AdminService,
+    notifier: TelegramNotifier,
+    state_file: Path,
+    max_backup_age_hours: int,
+    min_disk_free_percent: int = DEFAULT_ALERT_DISK_FREE_MIN_PERCENT,
+) -> int:
+    health = alert_health(service, max_backup_age_hours, min_disk_free_percent)
+    fingerprint = alert_fingerprint(health)
+    previous = load_alert_state(state_file).get("fingerprint")
+    should_notify = (previous is None and fingerprint != "ok") or (previous is not None and previous != fingerprint)
+
+    if should_notify:
+        notifier.send(format_alert_text(health))
+
+    save_alert_state(
+        state_file,
+        {
+            "fingerprint": fingerprint,
+            "status": health["status"],
+            "updatedAt": int(time.time()),
+        },
+    )
+    return 0 if health["status"] == "ok" else 2
+
+
+def run_alert_monitor(
+    service: AdminService,
+    notifier: TelegramNotifier,
+    state_file: Path,
+    interval_seconds: int,
+    max_backup_age_hours: int,
+    min_disk_free_percent: int,
+    once: bool = False,
+) -> int:
+    while True:
+        try:
+            exit_code = alert_tick(service, notifier, state_file, max_backup_age_hours, min_disk_free_percent)
+        except Exception as exc:  # noqa: BLE001 - monitor must stay alive between attempts.
+            print(f"Mirage Telegram alert check failed: {exc}", file=sys.stderr, flush=True)
+            if once:
+                return 1
+            time.sleep(interval_seconds)
+            continue
+        if once:
+            return exit_code
+        time.sleep(interval_seconds)
+
 
 def read_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     length = int(handler.headers.get("Content-Length") or 0)
@@ -395,6 +637,12 @@ def make_handler(service: AdminService, token: str) -> type[BaseHTTPRequestHandl
             if method == "GET" and route == ["vpn", "diagnostics"]:
                 self._send_json(HTTPStatus.OK, service.diagnostics())
                 return
+            if method == "GET" and route == ["alerts"]:
+                self._send_json(HTTPStatus.OK, service.alert_status())
+                return
+            if method == "POST" and route == ["alerts", "test"]:
+                self._send_json(HTTPStatus.OK, service.send_test_alert())
+                return
 
             if method == "GET" and route == ["profiles"]:
                 self._send_json(HTTPStatus.OK, service.list_profiles())
@@ -479,5 +727,57 @@ def serve() -> None:
     server.serve_forever()
 
 
+def monitor(once: bool = False) -> int:
+    load_runtime_env()
+    try:
+        config = alert_config()
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    token = config["botToken"]
+    chat_id = config["chatId"]
+    interval_seconds = config["intervalSeconds"]
+    enabled = config["enabled"]
+    if not enabled:
+        print("Mirage Telegram alerts are disabled", flush=True)
+        if once:
+            return 0
+        while True:
+            time.sleep(interval_seconds)
+    if not token or not chat_id:
+        raise SystemExit("MIRAGE_ALERT_TELEGRAM_BOT_TOKEN and MIRAGE_ALERT_TELEGRAM_CHAT_ID are required")
+
+    service = build_service()
+    state_file = config["stateFile"]
+    max_backup_age_hours = config["maxBackupAgeHours"]
+    min_disk_free_percent = config["minDiskFreePercent"]
+    notifier = TelegramNotifier(token, chat_id)
+    return run_alert_monitor(
+        service,
+        notifier,
+        state_file,
+        interval_seconds,
+        max_backup_age_hours,
+        min_disk_free_percent,
+        once=once,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Mirage local admin service.")
+    sub = parser.add_subparsers(dest="command")
+    sub.add_parser("serve", help="Run local admin API and static UI.")
+    monitor_parser = sub.add_parser("monitor", help="Run Telegram health alerts loop.")
+    monitor_parser.add_argument("--once", action="store_true", help="Run one alert check and exit.")
+    args = parser.parse_args(argv)
+
+    if args.command in {None, "serve"}:
+        serve()
+        return 0
+    if args.command == "monitor":
+        return monitor(once=args.once)
+    parser.error(f"unknown command: {args.command}")
+    return 2
+
+
 if __name__ == "__main__":
-    serve()
+    raise SystemExit(main())

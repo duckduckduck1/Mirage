@@ -1,10 +1,13 @@
 import json
+import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 from urllib import error, request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -72,6 +75,33 @@ class FakeApi:
         if path != "/panel/api/server/getDb":
             raise AssertionError(path)
         return self.downloaded
+
+
+class FakeNotifier:
+    def __init__(self):
+        self.messages = []
+
+    def send(self, text):
+        self.messages.append(text)
+
+
+class FailingNotifier:
+    def send(self, _text):
+        raise RuntimeError("telegram is unavailable")
+
+
+class FakeAlertService:
+    def __init__(self, statuses, backup_dir):
+        self.statuses = list(statuses)
+        self.backup_dir = backup_dir
+
+    def health(self):
+        status = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
+        ok = status == "ok"
+        check = {"ok": ok}
+        if not ok:
+            check["error"] = "x-ui is unavailable"
+        return {"status": status, "checks": {"xuiApi": check}}
 
 
 class AdminApiTests(unittest.TestCase):
@@ -163,6 +193,51 @@ class AdminApiTests(unittest.TestCase):
             self.assertTrue(created["name"].startswith("x-ui-"))
             self.assertEqual(listed["backups"][0]["name"], created["name"])
 
+    def test_alert_status_hides_telegram_secrets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            backup = Path(tmp) / "x-ui-20260101-000000.db"
+            backup.write_bytes(b"backup")
+            service = admin_api.AdminService(FakeApi(), backup_dir=Path(tmp))
+            with patch.dict(
+                os.environ,
+                {
+                    "MIRAGE_ALERTS_ENABLED": "true",
+                    "MIRAGE_ALERT_TELEGRAM_BOT_TOKEN": "test-bot-token",
+                    "MIRAGE_ALERT_TELEGRAM_CHAT_ID": "test-chat-id",
+                    "MIRAGE_ALERT_STATE_FILE": str(Path(tmp) / "state.json"),
+                },
+                clear=True,
+            ):
+                payload = service.alert_status()
+
+        serialized = json.dumps(payload)
+        self.assertTrue(payload["enabled"])
+        self.assertTrue(payload["configured"])
+        self.assertNotIn("test-bot-token", serialized)
+        self.assertNotIn("test-chat-id", serialized)
+
+    def test_send_test_alert_uses_configured_notifier(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            notifier = FakeNotifier()
+            service = admin_api.AdminService(
+                FakeApi(),
+                backup_dir=Path(tmp),
+                notifier_factory=lambda _token, _chat: notifier,
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "MIRAGE_ALERTS_ENABLED": "true",
+                    "MIRAGE_ALERT_TELEGRAM_BOT_TOKEN": "test-bot-token",
+                    "MIRAGE_ALERT_TELEGRAM_CHAT_ID": "test-chat-id",
+                },
+                clear=True,
+            ):
+                payload = service.send_test_alert()
+
+        self.assertEqual(payload, {"sent": True})
+        self.assertEqual(notifier.messages, ["Mirage VPN: тестовое уведомление"])
+
     def test_http_handler_serves_static_and_requires_token_for_api(self):
         with tempfile.TemporaryDirectory() as tmp:
             service = admin_api.AdminService(
@@ -201,6 +276,66 @@ class AdminApiTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=5)
+
+    def test_backup_freshness_check_uses_latest_backup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "x-ui-20260101-000000.db"
+            path.write_bytes(b"backup")
+            now = time.time()
+            os.utime(path, (now, now))
+
+            payload = admin_api.backup_freshness_check(Path(tmp), 36)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["latest"], "x-ui-20260101-000000.db")
+
+    def test_alert_tick_notifies_on_degradation_and_recovery_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = FakeAlertService(["degraded", "degraded", "ok"], Path(tmp))
+            notifier = FakeNotifier()
+            state_file = Path(tmp) / "state.json"
+
+            first = admin_api.alert_tick(service, notifier, state_file, max_backup_age_hours=0)
+            second = admin_api.alert_tick(service, notifier, state_file, max_backup_age_hours=0)
+            third = admin_api.alert_tick(service, notifier, state_file, max_backup_age_hours=0)
+
+        self.assertEqual(first, 2)
+        self.assertEqual(second, 2)
+        self.assertEqual(third, 0)
+        self.assertEqual(len(notifier.messages), 2)
+        self.assertIn("деградация", notifier.messages[0])
+        self.assertIn("восстановлен", notifier.messages[1])
+
+    def test_alert_tick_does_not_notify_on_initial_healthy_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = FakeAlertService(["ok"], Path(tmp))
+            notifier = FakeNotifier()
+
+            code = admin_api.alert_tick(
+                service,
+                notifier,
+                Path(tmp) / "state.json",
+                max_backup_age_hours=0,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(notifier.messages, [])
+
+    def test_alert_monitor_handles_notifier_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = FakeAlertService(["degraded"], Path(tmp))
+
+            code = admin_api.run_alert_monitor(
+                service,
+                FailingNotifier(),
+                Path(tmp) / "state.json",
+                interval_seconds=5,
+                max_backup_age_hours=0,
+                min_disk_free_percent=0,
+                once=True,
+            )
+
+        self.assertEqual(code, 1)
 
 
 if __name__ == "__main__":

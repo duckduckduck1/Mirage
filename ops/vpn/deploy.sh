@@ -80,6 +80,13 @@ random_hex() {
   printf '\n'
 }
 
+env_file_value() {
+  local file="$1"
+  local key="$2"
+  [[ -f "$file" ]] || return 0
+  awk -F= -v key="$key" '$1 == key {print substr($0, length(key) + 2); exit}' "$file"
+}
+
 random_port() {
   shuf -i 10000-60000 -n 1
 }
@@ -219,15 +226,30 @@ write_admin_env() {
   log "Writing Mirage Admin env"
   local admin_token
   if [[ -f "$ADMIN_ENV_FILE" ]]; then
-    admin_token="$(awk -F= '/^MIRAGE_ADMIN_TOKEN=/ {print $2; exit}' "$ADMIN_ENV_FILE" || true)"
+    admin_token="$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_TOKEN || true)"
   fi
   admin_token="${admin_token:-${MIRAGE_ADMIN_TOKEN:-$(random_hex 24)}}"
+
+  local alerts_enabled alert_bot_token alert_chat_id alert_interval alert_backup_max_age alert_disk_free_min
+  alerts_enabled="${MIRAGE_ALERTS_ENABLED:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ALERTS_ENABLED || true)}"
+  alert_bot_token="${MIRAGE_ALERT_TELEGRAM_BOT_TOKEN:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ALERT_TELEGRAM_BOT_TOKEN || true)}"
+  alert_chat_id="${MIRAGE_ALERT_TELEGRAM_CHAT_ID:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ALERT_TELEGRAM_CHAT_ID || true)}"
+  alert_interval="${MIRAGE_ALERT_INTERVAL_SECONDS:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ALERT_INTERVAL_SECONDS || true)}"
+  alert_backup_max_age="${MIRAGE_ALERT_BACKUP_MAX_AGE_HOURS:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ALERT_BACKUP_MAX_AGE_HOURS || true)}"
+  alert_disk_free_min="${MIRAGE_ALERT_DISK_FREE_MIN_PERCENT:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ALERT_DISK_FREE_MIN_PERCENT || true)}"
 
   cat > "$ADMIN_ENV_FILE" <<EOF
 MIRAGE_ADMIN_HOST=127.0.0.1
 MIRAGE_ADMIN_PORT=${MIRAGE_ADMIN_PORT:-$DEFAULT_ADMIN_PORT}
 MIRAGE_ADMIN_TOKEN=${admin_token}
 MIRAGE_ADMIN_BACKUP_DIR_HOST=$BACKUP_DIR
+MIRAGE_ALERTS_ENABLED=${alerts_enabled:-false}
+MIRAGE_ALERT_TELEGRAM_BOT_TOKEN=${alert_bot_token:-}
+MIRAGE_ALERT_TELEGRAM_CHAT_ID=${alert_chat_id:-}
+MIRAGE_ALERT_INTERVAL_SECONDS=${alert_interval:-60}
+MIRAGE_ALERT_BACKUP_MAX_AGE_HOURS=${alert_backup_max_age:-36}
+MIRAGE_ALERT_DISK_FREE_MIN_PERCENT=${alert_disk_free_min:-10}
+MIRAGE_ALERT_STATE_DIR_HOST=$OUTPUT_DIR/alerts
 EOF
   chmod 600 "$ADMIN_ENV_FILE"
 }
@@ -374,6 +396,10 @@ render_access_file() {
     printf '- Backup directory: `%s`\n' "$BACKUP_DIR"
     printf '- Timer: `mirage-xui-backup.timer`\n'
     printf '- Manual backup: `sudo /usr/local/bin/mirage-xui-backup`\n'
+    printf '\n## Telegram alerts\n\n'
+    printf '- Enabled: `%s`\n' "$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ALERTS_ENABLED || printf 'false')"
+    printf '- State directory: `%s`\n' "$OUTPUT_DIR/alerts"
+    printf '- Service: `mirage-alerts`\n'
   } > "$access_file"
 
   chmod 600 "$access_file"
@@ -397,7 +423,8 @@ main() {
   BACKUP_DIR="${MIRAGE_VPN_BACKUP_DIR:-$OUTPUT_DIR/backups}"
 
   mkdir -p "$OUTPUT_DIR" "$BACKUP_DIR"
-  chmod 700 "$OUTPUT_DIR" "$BACKUP_DIR"
+  mkdir -p "$OUTPUT_DIR/alerts"
+  chmod 700 "$OUTPUT_DIR" "$BACKUP_DIR" "$OUTPUT_DIR/alerts"
 
   log "Deploying Mirage VPN for host: $PUBLIC_HOST"
   log "Access bundle: $OUTPUT_DIR"
