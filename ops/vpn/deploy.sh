@@ -248,7 +248,12 @@ collect_client_links() {
   for client in $DEFAULT_CLIENTS; do
     xui_ops links --email "$client" > "$OUTPUT_DIR/links/${client}.txt"
     xui_ops sub-links --email "$client" > "$OUTPUT_DIR/links/${client}.subscription.txt" 2>/dev/null || true
-    chmod 600 "$OUTPUT_DIR/links/${client}.txt" "$OUTPUT_DIR/links/${client}.subscription.txt" 2>/dev/null || true
+    xui_ops subscriptions --email "$client" > "$OUTPUT_DIR/links/${client}.profile.txt"
+    xui_ops subscriptions --email "$client" --json > "$OUTPUT_DIR/links/${client}.profile.json"
+    chmod 600 "$OUTPUT_DIR/links/${client}.txt" \
+      "$OUTPUT_DIR/links/${client}.subscription.txt" \
+      "$OUTPUT_DIR/links/${client}.profile.txt" \
+      "$OUTPUT_DIR/links/${client}.profile.json" 2>/dev/null || true
   done
 }
 
@@ -322,6 +327,8 @@ render_access_file() {
       printf '### %s\n\n' "$client"
       printf 'Direct link file: `%s`\n\n' "$OUTPUT_DIR/links/${client}.txt"
       sed 's/^/- `/' "$OUTPUT_DIR/links/${client}.txt" | sed 's/$/`/'
+      printf '\nProfile bundle: `%s`\n' "$OUTPUT_DIR/links/${client}.profile.txt"
+      printf 'Profile bundle JSON: `%s`\n' "$OUTPUT_DIR/links/${client}.profile.json"
       if [[ -s "$OUTPUT_DIR/links/${client}.subscription.txt" ]]; then
         printf '\nSubscription-derived links: `%s`\n\n' "$OUTPUT_DIR/links/${client}.subscription.txt"
         sed 's/^/- `/' "$OUTPUT_DIR/links/${client}.subscription.txt" | sed 's/$/`/'

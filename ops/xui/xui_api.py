@@ -706,6 +706,170 @@ def get_links(api: XuiClient, email: str, public_host: str | None = None) -> lis
     return [rewrite_link_host(str(item), public_host) for item in links]
 
 
+def get_subscription_links(api: XuiClient, email: str, public_host: str | None = None) -> tuple[str | None, list[str]]:
+    client = get_client(api, email)
+    if not client or not isinstance(client.get("client"), dict):
+        raise SystemExit(f"Client not found: {email}")
+    sub_id = client["client"].get("subId")
+    if not sub_id:
+        return None, []
+    payload = api.api("GET", f"/panel/api/clients/subLinks/{parse.quote(str(sub_id), safe='')}")
+    links = [rewrite_link_host(str(item), public_host) for item in (extract_obj(payload) or [])]
+    return str(sub_id), links
+
+
+def first_query_value(query: dict[str, list[str]], *names: str) -> str:
+    for name in names:
+        values = query.get(name)
+        if values:
+            return values[0]
+    return ""
+
+
+def parse_vless_reality_link(link: str) -> dict[str, Any]:
+    parsed = parse.urlsplit(link.strip())
+    if parsed.scheme != "vless":
+        return {"link": link, "manual": {}, "warnings": ["Primary link is not a vless:// link."]}
+
+    query = parse.parse_qs(parsed.query, keep_blank_values=True)
+    manual = {
+        "address": parsed.hostname or "",
+        "port": parsed.port or "",
+        "uuid": parse.unquote(parsed.username or ""),
+        "network": first_query_value(query, "type", "network"),
+        "security": first_query_value(query, "security"),
+        "flow": first_query_value(query, "flow"),
+        "sni": first_query_value(query, "sni", "serverName"),
+        "fingerprint": first_query_value(query, "fp", "fingerprint"),
+        "publicKey": first_query_value(query, "pbk", "publicKey"),
+        "shortId": first_query_value(query, "sid", "shortId"),
+        "spiderX": first_query_value(query, "spx", "spiderX"),
+        "encryption": first_query_value(query, "encryption"),
+        "remark": parse.unquote(parsed.fragment or ""),
+    }
+
+    warnings = []
+    required = {
+        "flow": "flow",
+        "sni": "sni",
+        "publicKey": "pbk/publicKey",
+        "shortId": "sid/shortId",
+        "fingerprint": "fp/fingerprint",
+    }
+    missing = [label for key, label in required.items() if not manual.get(key)]
+    if missing:
+        warnings.append(f"Missing Reality fields: {', '.join(missing)}.")
+    if manual.get("security") != "reality":
+        warnings.append("Security is not reality.")
+    if manual.get("network") != "tcp":
+        warnings.append("Network is not tcp.")
+    return {"link": link, "manual": manual, "warnings": warnings}
+
+
+def build_subscription_bundle(api: XuiClient, email: str, public_host: str | None = None) -> dict[str, Any]:
+    direct_links = get_links(api, email, public_host)
+    subscription_warning = ""
+    try:
+        sub_id, subscription_links = get_subscription_links(api, email, public_host)
+    except ApiError as exc:
+        sub_id, subscription_links = None, []
+        subscription_warning = f"Subscription-derived links are not available from 3x-ui: {exc}"
+    primary = next((item for item in direct_links if item.startswith("vless://")), direct_links[0] if direct_links else "")
+    parsed = parse_vless_reality_link(primary) if primary else {
+        "link": "",
+        "manual": {},
+        "warnings": ["No direct VLESS link was returned by 3x-ui."],
+    }
+    warnings = list(parsed.get("warnings") or [])
+    if subscription_warning:
+        warnings.append(subscription_warning)
+    elif not subscription_links:
+        warnings.append("Subscription-derived links are not available from 3x-ui.")
+    return {
+        "email": email,
+        "hiddify": {
+            "directLinks": direct_links,
+            "subscriptionDerivedLinks": subscription_links,
+        },
+        "v2raytun": {
+            "manual": parsed.get("manual") or {},
+            "sourceLink": parsed.get("link") or "",
+        },
+        "raw": {
+            "subId": sub_id,
+            "directLinks": direct_links,
+            "subscriptionDerivedLinks": subscription_links,
+        },
+        "diagnostics": {
+            "warnings": warnings,
+        },
+    }
+
+
+def print_link_list(title: str, links: list[str]) -> None:
+    print(title)
+    if links:
+        for link in links:
+            print(link)
+    else:
+        print("not available")
+    print("")
+
+
+def print_manual_fields(fields: dict[str, Any]) -> None:
+    labels = [
+        ("address", "Address"),
+        ("port", "Port"),
+        ("uuid", "UUID"),
+        ("network", "Network"),
+        ("security", "Security"),
+        ("flow", "Flow"),
+        ("sni", "SNI"),
+        ("fingerprint", "Fingerprint / uTLS"),
+        ("publicKey", "Public key"),
+        ("shortId", "Short ID"),
+        ("spiderX", "SpiderX"),
+        ("encryption", "Encryption"),
+    ]
+    for key, label in labels:
+        print(f"{label}: {fields.get(key) or 'not available'}")
+    print("")
+
+
+def print_subscription_bundle(bundle: dict[str, Any], target: str) -> None:
+    print("Client subscription profile")
+    print("---------------------------")
+    print(f"email: {bundle['email']}")
+    print("")
+
+    if target in {"all", "hiddify"}:
+        print("Hiddify")
+        print("-------")
+        print_link_list("Direct VLESS links:", bundle["hiddify"]["directLinks"])
+        print_link_list("Subscription-derived links:", bundle["hiddify"]["subscriptionDerivedLinks"])
+
+    if target in {"all", "v2raytun"}:
+        print("V2RayTun manual fields")
+        print("----------------------")
+        print_manual_fields(bundle["v2raytun"]["manual"])
+
+    if target in {"all", "raw"}:
+        print("Raw links")
+        print("---------")
+        print(f"subId: {bundle['raw'].get('subId') or 'not available'}")
+        print_link_list("Direct VLESS links:", bundle["raw"]["directLinks"])
+        print_link_list("Subscription-derived links:", bundle["raw"]["subscriptionDerivedLinks"])
+
+    print("Diagnostics")
+    print("-----------")
+    warnings = bundle["diagnostics"].get("warnings") or []
+    if warnings:
+        for warning in warnings:
+            print(f"warning: {warning}")
+    else:
+        print("warnings: none")
+
+
 def build_client_payload(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]:
     defaults = config.get("default_client") or {}
     total_gb = getattr(args, "total_gb", None)
@@ -887,19 +1051,24 @@ def cmd_links(args: argparse.Namespace, config: dict[str, Any]) -> int:
 
 def cmd_sub_links(args: argparse.Namespace, config: dict[str, Any]) -> int:
     api = api_from_args(args, config)
-    client = get_client(api, args.email)
-    if not client or not isinstance(client.get("client"), dict):
-        raise SystemExit(f"Client not found: {args.email}")
-    sub_id = client["client"].get("subId")
+    sub_id, links = get_subscription_links(api, args.email, public_host_value(args, config))
     if not sub_id:
         raise SystemExit(f"Client has no subId: {args.email}")
-    payload = api.api("GET", f"/panel/api/clients/subLinks/{parse.quote(str(sub_id), safe='')}")
-    links = [rewrite_link_host(str(item), public_host_value(args, config)) for item in (extract_obj(payload) or [])]
     if args.json:
         print_json({"email": args.email, "subId": sub_id, "links": links})
     else:
         for link in links:
             print(link)
+    return 0
+
+
+def cmd_subscriptions(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    api = api_from_args(args, config)
+    bundle = build_subscription_bundle(api, args.email, public_host_value(args, config))
+    if args.json:
+        print_json(bundle)
+        return 0
+    print_subscription_bundle(bundle, args.target)
     return 0
 
 
@@ -964,6 +1133,7 @@ def cmd_access_info(args: argparse.Namespace, config: dict[str, Any]) -> int:
                 "bootstrap-vpn --reset-inbound --print-links"
             ),
             "sync_users": "docker compose -f ops/xui/compose.yml run --rm xui-ops sync-users --print-links",
+            "subscriptions": "docker compose -f ops/xui/compose.yml run --rm xui-ops subscriptions --email main",
             "backup_db": "docker compose -f ops/xui/compose.yml run --rm xui-ops backup-db",
         },
     }
@@ -1253,6 +1423,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub_links = sub.add_parser("sub-links", help="Print protocol links resolved through a client's subId.")
     sub_links.add_argument("--email", required=True)
     sub_links.set_defaults(func=cmd_sub_links)
+
+    subscriptions = sub.add_parser("subscriptions", help="Print client profile bundle for VPN apps.")
+    subscriptions.add_argument("--email", required=True)
+    subscriptions.add_argument("--target", choices=["all", "hiddify", "v2raytun", "raw"], default="all")
+    subscriptions.add_argument("--json", action="store_true")
+    subscriptions.set_defaults(func=cmd_subscriptions)
 
     enable = sub.add_parser("enable-client", help="Enable one or more clients.")
     enable.add_argument("--email", nargs="+", required=True)

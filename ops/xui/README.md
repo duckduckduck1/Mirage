@@ -135,6 +135,14 @@ sudo docker compose -f ops/xui/compose.yml run --rm xui-ops links --email main
 sudo docker compose -f ops/xui/compose.yml run --rm xui-ops sub-links --email main
 ```
 
+Вывести профиль для Hiddify и ручные поля для V2RayTun:
+
+```bash
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops subscriptions --email main
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops subscriptions --email main --target v2raytun
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops subscriptions --email main --json
+```
+
 Отключить клиента:
 
 ```bash
