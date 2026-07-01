@@ -6,11 +6,15 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 XUI_OPS_DIR="$REPO_ROOT/ops/xui"
 XUI_ENV_FILE="$XUI_OPS_DIR/.env.local"
 XUI_COMPOSE_FILE="$XUI_OPS_DIR/compose.yml"
+ADMIN_DIR="$REPO_ROOT/ops/admin"
+ADMIN_ENV_FILE="$ADMIN_DIR/.env.local"
+ADMIN_COMPOSE_FILE="$ADMIN_DIR/compose.yml"
 XUI_INSTALL_RESULT="/etc/x-ui/install-result.env"
 XUI_INSTALL_URL="https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh"
 DEFAULT_REALITY_TARGET="www.amazon.com:443"
 DEFAULT_REALITY_SNI="www.amazon.com"
 DEFAULT_CLIENTS="main partner shared"
+DEFAULT_ADMIN_PORT="8090"
 
 log() {
   printf '\n[%s] %s\n' "$(date +%H:%M:%S)" "$*"
@@ -211,6 +215,28 @@ build_xui_ops() {
   docker compose -f "$XUI_COMPOSE_FILE" build
 }
 
+write_admin_env() {
+  log "Writing Mirage Admin env"
+  local admin_token
+  if [[ -f "$ADMIN_ENV_FILE" ]]; then
+    admin_token="$(awk -F= '/^MIRAGE_ADMIN_TOKEN=/ {print $2; exit}' "$ADMIN_ENV_FILE" || true)"
+  fi
+  admin_token="${admin_token:-${MIRAGE_ADMIN_TOKEN:-$(random_hex 24)}}"
+
+  cat > "$ADMIN_ENV_FILE" <<EOF
+MIRAGE_ADMIN_HOST=127.0.0.1
+MIRAGE_ADMIN_PORT=${MIRAGE_ADMIN_PORT:-$DEFAULT_ADMIN_PORT}
+MIRAGE_ADMIN_TOKEN=${admin_token}
+MIRAGE_ADMIN_BACKUP_DIR_HOST=$BACKUP_DIR
+EOF
+  chmod 600 "$ADMIN_ENV_FILE"
+}
+
+start_admin_api() {
+  log "Starting Mirage Admin API"
+  docker compose --env-file "$ADMIN_ENV_FILE" -f "$ADMIN_COMPOSE_FILE" up -d --build
+}
+
 ensure_api_token() {
   if [[ -n "$XUI_API_TOKEN" ]]; then
     return
@@ -309,10 +335,19 @@ render_access_file() {
   local access_file="$OUTPUT_DIR/access.md"
   local tunnel_url="http://127.0.0.1:2096/${XUI_WEB_BASE_PATH}"
   local tunnel_command="ssh -i \$HOME\\.ssh\\mirage_ed25519 -N -L 2096:127.0.0.1:${XUI_PANEL_PORT} ${RUNTIME_USER}@${PUBLIC_HOST}"
+  local admin_port="${MIRAGE_ADMIN_PORT:-$DEFAULT_ADMIN_PORT}"
+  local admin_url="http://127.0.0.1:${admin_port}/"
+  local admin_tunnel_command="ssh -i \$HOME\\.ssh\\mirage_ed25519 -N -L ${admin_port}:127.0.0.1:${admin_port} ${RUNTIME_USER}@${PUBLIC_HOST}"
+  local admin_token
+  admin_token="$(awk -F= '/^MIRAGE_ADMIN_TOKEN=/ {print $2; exit}' "$ADMIN_ENV_FILE" || true)"
 
   {
     printf '# Mirage VPN access\n\n'
     printf 'Generated: %s\n\n' "$(date -Is)"
+    printf '## Mirage Admin\n\n'
+    printf '- Local URL after SSH tunnel: `%s`\n' "$admin_url"
+    printf '- SSH tunnel command from Windows PowerShell: `%s`\n' "$admin_tunnel_command"
+    printf '- API token: `%s`\n\n' "${admin_token:-stored in $ADMIN_ENV_FILE}"
     printf '## Panel\n\n'
     printf '- Public host: `%s`\n' "$PUBLIC_HOST"
     printf '- Panel port on VPS: `%s`\n' "$XUI_PANEL_PORT"
@@ -376,6 +411,8 @@ main() {
   write_xui_env
   build_xui_ops
   ensure_api_token
+  write_admin_env
+  start_admin_api
   bootstrap_vpn
   collect_client_links
   install_backup_timer
