@@ -230,6 +230,10 @@ write_admin_env() {
   fi
   admin_token="${admin_token:-${MIRAGE_ADMIN_TOKEN:-$(random_hex 24)}}"
 
+  local backup_retention_days backup_keep_min
+  backup_retention_days="${MIRAGE_ADMIN_BACKUP_RETENTION_DAYS:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_BACKUP_RETENTION_DAYS || true)}"
+  backup_keep_min="${MIRAGE_ADMIN_BACKUP_KEEP_MIN:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_BACKUP_KEEP_MIN || true)}"
+
   local alerts_enabled alert_bot_token alert_chat_id alert_interval alert_backup_max_age alert_disk_free_min
   alerts_enabled="${MIRAGE_ALERTS_ENABLED:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ALERTS_ENABLED || true)}"
   alert_bot_token="${MIRAGE_ALERT_TELEGRAM_BOT_TOKEN:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ALERT_TELEGRAM_BOT_TOKEN || true)}"
@@ -243,6 +247,8 @@ MIRAGE_ADMIN_HOST=127.0.0.1
 MIRAGE_ADMIN_PORT=${MIRAGE_ADMIN_PORT:-$DEFAULT_ADMIN_PORT}
 MIRAGE_ADMIN_TOKEN=${admin_token}
 MIRAGE_ADMIN_BACKUP_DIR_HOST=$BACKUP_DIR
+MIRAGE_ADMIN_BACKUP_RETENTION_DAYS=${backup_retention_days:-14}
+MIRAGE_ADMIN_BACKUP_KEEP_MIN=${backup_keep_min:-3}
 MIRAGE_ALERTS_ENABLED=${alerts_enabled:-false}
 MIRAGE_ALERT_TELEGRAM_BOT_TOKEN=${alert_bot_token:-}
 MIRAGE_ALERT_TELEGRAM_CHAT_ID=${alert_chat_id:-}
@@ -312,9 +318,34 @@ install_backup_timer() {
   cat > /usr/local/bin/mirage-xui-backup <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
+if [ -f "$ADMIN_ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ADMIN_ENV_FILE"
+  set +a
+fi
 mkdir -p "$BACKUP_DIR"
 docker compose -f "$XUI_COMPOSE_FILE" run --rm xui-ops backup-db --output "$BACKUP_DIR/x-ui-\$(date +%Y%m%d-%H%M%S).db"
-find "$BACKUP_DIR" -type f -name 'x-ui-*.db' -mtime +14 -delete
+retention_days="\${MIRAGE_ADMIN_BACKUP_RETENTION_DAYS:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_BACKUP_RETENTION_DAYS || printf '14')}"
+keep_min="\${MIRAGE_ADMIN_BACKUP_KEEP_MIN:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_BACKUP_KEEP_MIN || printf '3')}"
+python3 - "$BACKUP_DIR" "\$retention_days" "\$keep_min" <<'PY'
+import sys
+import time
+from pathlib import Path
+
+backup_dir = Path(sys.argv[1])
+retention_days = int(sys.argv[2])
+keep_min = int(sys.argv[3])
+cutoff = time.time() - retention_days * 24 * 3600
+backups = sorted(
+    backup_dir.glob("x-ui-*.db"),
+    key=lambda path: path.stat().st_mtime,
+    reverse=True,
+)
+for path in backups[keep_min:]:
+    if path.stat().st_mtime < cutoff:
+        path.unlink()
+PY
 chmod 700 "$BACKUP_DIR"
 chmod 600 "$BACKUP_DIR"/x-ui-*.db 2>/dev/null || true
 if id "$RUNTIME_USER" >/dev/null 2>&1 && [ "$RUNTIME_USER" != "root" ]; then
@@ -394,6 +425,8 @@ render_access_file() {
     done
     printf '## Backups\n\n'
     printf '- Backup directory: `%s`\n' "$BACKUP_DIR"
+    printf '- Retention days: `%s`\n' "$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_BACKUP_RETENTION_DAYS || printf '14')"
+    printf '- Minimum kept backups: `%s`\n' "$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_BACKUP_KEEP_MIN || printf '3')"
     printf '- Timer: `mirage-xui-backup.timer`\n'
     printf '- Manual backup: `sudo /usr/local/bin/mirage-xui-backup`\n'
     printf '\n## Telegram alerts\n\n'

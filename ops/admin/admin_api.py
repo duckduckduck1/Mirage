@@ -35,6 +35,8 @@ BACKUP_RE = re.compile(r"^x-ui-\d{8}-\d{6}(?:-\d{3})?\.db$")
 DEFAULT_ADMIN_HOST = "127.0.0.1"
 DEFAULT_ADMIN_PORT = 8090
 DEFAULT_BACKUP_DIR = Path("/data/backups")
+DEFAULT_BACKUP_RETENTION_DAYS = 14
+DEFAULT_BACKUP_KEEP_MIN = 3
 DEFAULT_ALERT_INTERVAL_SECONDS = 60
 DEFAULT_ALERT_STATE_FILE = Path("/data/alerts/state.json")
 DEFAULT_ALERT_BACKUP_MAX_AGE_HOURS = 36
@@ -161,6 +163,28 @@ def static_path_for_request(raw_path: str, static_dir: Path = STATIC_DIR) -> Pat
     if candidate.is_dir():
         candidate = candidate / "index.html"
     return candidate
+
+
+def backup_policy() -> dict[str, int]:
+    return {
+        "retentionDays": env_int("MIRAGE_ADMIN_BACKUP_RETENTION_DAYS", DEFAULT_BACKUP_RETENTION_DAYS, minimum=1),
+        "keepMin": env_int("MIRAGE_ADMIN_BACKUP_KEEP_MIN", DEFAULT_BACKUP_KEEP_MIN, minimum=1),
+    }
+
+
+def backup_info(path: Path) -> dict[str, Any]:
+    stat = path.stat()
+    return {"name": path.name, "size": stat.st_size, "mtime": int(stat.st_mtime)}
+
+
+def backup_policy_value(payload: dict[str, Any], key: str, default: int) -> int:
+    raw = payload.get(key, default)
+    if raw is None or raw == "":
+        raw = default
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as exc:
+        raise AdminError(HTTPStatus.BAD_REQUEST, "retentionDays and keepMin must be integers") from exc
 
 
 class AdminService:
@@ -302,6 +326,7 @@ class AdminService:
 
     def create_backup(self) -> dict[str, Any]:
         self.backup_dir.mkdir(parents=True, exist_ok=True)
+        self.backup_dir.chmod(0o700)
         base_name = f"x-ui-{time.strftime('%Y%m%d-%H%M%S')}"
         path = self.backup_dir / f"{base_name}.db"
         for index in range(1000):
@@ -315,15 +340,22 @@ class AdminService:
         stat = path.stat()
         return {"name": path.name, "size": stat.st_size, "mtime": int(stat.st_mtime)}
 
-    def list_backups(self) -> dict[str, Any]:
+    def backup_files(self) -> list[Path]:
         self.backup_dir.mkdir(parents=True, exist_ok=True)
+        self.backup_dir.chmod(0o700)
         backups = []
-        for path in sorted(self.backup_dir.glob("x-ui-*.db"), reverse=True):
-            if not BACKUP_RE.fullmatch(path.name):
-                continue
-            stat = path.stat()
-            backups.append({"name": path.name, "size": stat.st_size, "mtime": int(stat.st_mtime)})
-        return {"backups": backups}
+        for path in self.backup_dir.glob("x-ui-*.db"):
+            if BACKUP_RE.fullmatch(path.name) and path.is_file():
+                backups.append(path)
+        return sorted(backups, key=lambda item: item.stat().st_mtime, reverse=True)
+
+    def list_backups(self) -> dict[str, Any]:
+        backups = [backup_info(path) for path in self.backup_files()]
+        return {
+            "backups": backups,
+            "policy": backup_policy(),
+            "totalSize": sum(item["size"] for item in backups),
+        }
 
     def backup_path(self, name: str) -> Path:
         if not BACKUP_RE.fullmatch(name):
@@ -335,6 +367,45 @@ class AdminService:
         if not path.is_file():
             raise AdminError(HTTPStatus.NOT_FOUND, "backup was not found")
         return path
+
+    def delete_backup(self, name: str, confirm_name: str | None = None) -> dict[str, Any]:
+        if confirm_name != name:
+            raise AdminError(HTTPStatus.BAD_REQUEST, "confirmName must match backup name")
+        path = self.backup_path(name)
+        if len(self.backup_files()) <= 1:
+            raise AdminError(HTTPStatus.CONFLICT, "cannot delete the last backup")
+        deleted = backup_info(path)
+        path.unlink()
+        return {"deleted": deleted}
+
+    def prune_backups(self, payload: dict[str, Any]) -> dict[str, Any]:
+        policy = backup_policy()
+        retention_days = backup_policy_value(payload, "retentionDays", policy["retentionDays"])
+        keep_min = backup_policy_value(payload, "keepMin", policy["keepMin"])
+        dry_run = payload.get("dryRun", True) is not False
+        if retention_days < 1:
+            raise AdminError(HTTPStatus.BAD_REQUEST, "retentionDays must be greater than or equal to 1")
+        if keep_min < 1:
+            raise AdminError(HTTPStatus.BAD_REQUEST, "keepMin must be greater than or equal to 1")
+        if not dry_run and payload.get("confirm") != "prune":
+            raise AdminError(HTTPStatus.BAD_REQUEST, "confirm must be prune for destructive backup cleanup")
+
+        backups = self.backup_files()
+        cutoff = time.time() - retention_days * 24 * 3600
+        candidates = [path for path in backups[keep_min:] if path.stat().st_mtime < cutoff]
+        pruned = [backup_info(path) for path in candidates]
+        if not dry_run and len(backups) - len(candidates) < keep_min:
+            raise AdminError(HTTPStatus.CONFLICT, "backup cleanup would violate keepMin")
+        if not dry_run:
+            for path in candidates:
+                path.unlink()
+        return {
+            "dryRun": dry_run,
+            "retentionDays": retention_days,
+            "keepMin": keep_min,
+            "pruned": pruned,
+            "remaining": len(backups) if dry_run else len(self.backup_files()),
+        }
 
     def alert_status(self) -> dict[str, Any]:
         config = alert_config()
@@ -663,6 +734,9 @@ def make_handler(service: AdminService, token: str) -> type[BaseHTTPRequestHandl
             if method == "POST" and route == ["backups"]:
                 self._send_json(HTTPStatus.CREATED, service.create_backup())
                 return
+            if method == "POST" and route == ["backups", "prune"]:
+                self._send_json(HTTPStatus.OK, service.prune_backups(read_json_body(self)))
+                return
             if method == "GET" and len(route) == 2 and route[:1] == ["backups"]:
                 path_obj = service.backup_path(route[1])
                 data = path_obj.read_bytes()
@@ -674,6 +748,11 @@ def make_handler(service: AdminService, token: str) -> type[BaseHTTPRequestHandl
                 self.end_headers()
                 self.wfile.write(data)
                 return
+            if method == "DELETE" and len(route) == 2 and route[:1] == ["backups"]:
+                query = parse.parse_qs(parsed.query)
+                confirm_name = (query.get("confirmName") or [""])[0]
+                self._send_json(HTTPStatus.OK, service.delete_backup(route[1], confirm_name))
+                return
 
             raise AdminError(HTTPStatus.NOT_FOUND, "not found")
 
@@ -683,9 +762,12 @@ def make_handler(service: AdminService, token: str) -> type[BaseHTTPRequestHandl
         def do_POST(self) -> None:  # noqa: N802
             self._handle("POST")
 
+        def do_DELETE(self) -> None:  # noqa: N802
+            self._handle("DELETE")
+
         def do_OPTIONS(self) -> None:  # noqa: N802
             self.send_response(HTTPStatus.NO_CONTENT)
-            self.send_header("Allow", "GET, POST, OPTIONS")
+            self.send_header("Allow", "GET, POST, DELETE, OPTIONS")
             self.end_headers()
 
         def _handle(self, method: str) -> None:

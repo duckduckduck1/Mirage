@@ -40,6 +40,23 @@ MIRAGE_ALERT_TELEGRAM_CHAT_ID=PASTE_CHAT_ID
 Уведомление отправляется только при переходе в деградацию или восстановление.
 Статус alerts и тестовое уведомление доступны из локальной панели.
 
+## Backup lifecycle
+
+Панель умеет создавать, скачивать, удалять отдельные backup-файлы и очищать
+старые backup по retention-политике. Политика задаётся в `ops/admin/.env.local`:
+
+```env
+MIRAGE_ADMIN_BACKUP_RETENTION_DAYS=14
+MIRAGE_ADMIN_BACKUP_KEEP_MIN=3
+```
+
+Prune удаляет только backup-файлы старше retention-периода и всегда сохраняет
+минимум `MIRAGE_ADMIN_BACKUP_KEEP_MIN` последних файлов.
+
+`POST /api/v0/backups/prune` без тела или с `dryRun: true` возвращает preview.
+Реальное удаление требует тело `{"dryRun": false, "confirm": "prune"}`.
+Удаление одного файла требует query-параметр `confirmName`, равный имени backup.
+
 ## API v0.1
 
 | Метод | Путь | Назначение |
@@ -58,6 +75,8 @@ MIRAGE_ALERT_TELEGRAM_CHAT_ID=PASTE_CHAT_ID
 | `POST` | `/api/v0/profiles/NAME/disable` | отключить профиль |
 | `GET` | `/api/v0/backups` | список backup-файлов |
 | `POST` | `/api/v0/backups` | создать backup базы 3x-ui |
+| `POST` | `/api/v0/backups/prune` | preview или удаление старых backup по retention-политике |
 | `GET` | `/api/v0/backups/FILE` | скачать backup |
+| `DELETE` | `/api/v0/backups/FILE?confirmName=FILE` | удалить один backup |
 
 Restore добавляется отдельным этапом.

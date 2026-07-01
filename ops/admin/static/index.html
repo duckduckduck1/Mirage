@@ -72,7 +72,10 @@
         <article class="panel">
           <div class="panel-head">
             <h2>Бэкапы</h2>
-            <button id="create-backup" type="button">Создать</button>
+            <div class="actions">
+              <button id="prune-backups" type="button">Очистить старые</button>
+              <button id="create-backup" type="button">Создать</button>
+            </div>
           </div>
           <div class="backup-list" id="backups"></div>
         </article>

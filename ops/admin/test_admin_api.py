@@ -9,6 +9,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 from urllib import error, request
+from urllib.parse import quote as parse_quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import admin_api
@@ -193,6 +194,118 @@ class AdminApiTests(unittest.TestCase):
             self.assertTrue(created["name"].startswith("x-ui-"))
             self.assertEqual(listed["backups"][0]["name"], created["name"])
 
+    def test_delete_backup_removes_one_valid_backup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "x-ui-20260101-000000.db"
+            path.write_bytes(b"backup")
+            keep = Path(tmp) / "x-ui-20260102-000000.db"
+            keep.write_bytes(b"backup")
+            service = admin_api.AdminService(FakeApi(), backup_dir=Path(tmp))
+
+            payload = service.delete_backup(path.name, path.name)
+            exists_after_delete = path.exists()
+
+        self.assertEqual(payload["deleted"]["name"], "x-ui-20260101-000000.db")
+        self.assertFalse(exists_after_delete)
+
+    def test_delete_backup_requires_matching_confirmation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "x-ui-20260101-000000.db"
+            path.write_bytes(b"backup")
+            keep = Path(tmp) / "x-ui-20260102-000000.db"
+            keep.write_bytes(b"backup")
+            service = admin_api.AdminService(FakeApi(), backup_dir=Path(tmp))
+
+            with self.assertRaises(admin_api.AdminError):
+                service.delete_backup(path.name, "wrong-name.db")
+
+    def test_delete_backup_rejects_last_backup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "x-ui-20260101-000000.db"
+            path.write_bytes(b"backup")
+            service = admin_api.AdminService(FakeApi(), backup_dir=Path(tmp))
+
+            with self.assertRaises(admin_api.AdminError):
+                service.delete_backup(path.name, path.name)
+
+    def test_delete_backup_missing_file_returns_not_found(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = admin_api.AdminService(FakeApi(), backup_dir=Path(tmp))
+            with self.assertRaises(admin_api.AdminError) as ctx:
+                service.delete_backup("x-ui-20260101-000000.db", "x-ui-20260101-000000.db")
+        self.assertEqual(ctx.exception.status, admin_api.HTTPStatus.NOT_FOUND)
+
+    def test_prune_backups_keeps_minimum_recent_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            now = time.time()
+            for index in range(5):
+                path = root / f"x-ui-2026010{index + 1}-000000.db"
+                path.write_bytes(b"backup")
+                age_days = index
+                if index >= 2:
+                    age_days = 30 + index
+                mtime = now - age_days * 24 * 3600
+                os.utime(path, (mtime, mtime))
+            service = admin_api.AdminService(FakeApi(), backup_dir=root)
+
+            payload = service.prune_backups({"retentionDays": 14, "keepMin": 2, "dryRun": False, "confirm": "prune"})
+            remaining = sorted(path.name for path in root.glob("x-ui-*.db"))
+
+        self.assertEqual(len(payload["pruned"]), 3)
+        self.assertEqual(payload["remaining"], 2)
+        self.assertEqual(len(remaining), 2)
+
+    def test_prune_backups_dry_run_does_not_delete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            newest = root / "x-ui-20260102-000000.db"
+            newest.write_bytes(b"backup")
+            path = root / "x-ui-20260101-000000.db"
+            path.write_bytes(b"backup")
+            old = time.time() - 40 * 24 * 3600
+            os.utime(newest, (time.time(), time.time()))
+            os.utime(path, (old, old))
+            service = admin_api.AdminService(FakeApi(), backup_dir=root)
+
+            payload = service.prune_backups({"retentionDays": 14, "keepMin": 1, "dryRun": True})
+            exists_after_dry_run = path.exists()
+
+        self.assertTrue(exists_after_dry_run)
+        self.assertEqual(payload["pruned"][0]["name"], "x-ui-20260101-000000.db")
+        self.assertEqual(payload["remaining"], 2)
+
+    def test_prune_backups_defaults_to_dry_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            newest = root / "x-ui-20260102-000000.db"
+            newest.write_bytes(b"backup")
+            path = root / "x-ui-20260101-000000.db"
+            path.write_bytes(b"backup")
+            old = time.time() - 40 * 24 * 3600
+            os.utime(path, (old, old))
+            service = admin_api.AdminService(FakeApi(), backup_dir=root)
+
+            payload = service.prune_backups({"retentionDays": 14, "keepMin": 1})
+            exists_after_prune = path.exists()
+
+        self.assertTrue(payload["dryRun"])
+        self.assertTrue(exists_after_prune)
+
+    def test_prune_backups_requires_confirmation_for_delete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = admin_api.AdminService(FakeApi(), backup_dir=Path(tmp))
+            with self.assertRaises(admin_api.AdminError):
+                service.prune_backups({"retentionDays": 14, "keepMin": 1, "dryRun": False})
+
+    def test_prune_backups_rejects_invalid_policy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = admin_api.AdminService(FakeApi(), backup_dir=Path(tmp))
+            with self.assertRaises(admin_api.AdminError):
+                service.prune_backups({"retentionDays": "bad", "keepMin": 1})
+            with self.assertRaises(admin_api.AdminError):
+                service.prune_backups({"retentionDays": 0, "keepMin": 1})
+
     def test_alert_status_hides_telegram_secrets(self):
         with tempfile.TemporaryDirectory() as tmp:
             backup = Path(tmp) / "x-ui-20260101-000000.db"
@@ -272,6 +385,21 @@ class AdminApiTests(unittest.TestCase):
                 with request.urlopen(req, timeout=5) as response:
                     payload = json.loads(response.read().decode("utf-8"))
                 self.assertEqual(payload["profiles"][0]["email"], "main")
+
+                backup = Path(tmp) / "x-ui-20260101-000000.db"
+                backup.write_bytes(b"backup")
+                keep = Path(tmp) / "x-ui-20260102-000000.db"
+                keep.write_bytes(b"backup")
+                encoded = parse_quote(backup.name)
+                delete_req = request.Request(
+                    f"{base_url}/api/v0/backups/{encoded}?confirmName={encoded}",
+                    headers={"Authorization": "Bearer test-token"},
+                    method="DELETE",
+                )
+                with request.urlopen(delete_req, timeout=5) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(payload["deleted"]["name"], backup.name)
+                self.assertFalse(backup.exists())
             finally:
                 server.shutdown()
                 server.server_close()
