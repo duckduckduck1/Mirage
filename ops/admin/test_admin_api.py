@@ -1,8 +1,11 @@
 import json
 import sys
 import tempfile
+import threading
 import unittest
+from http.server import ThreadingHTTPServer
 from pathlib import Path
+from urllib import error, request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import admin_api
@@ -76,6 +79,30 @@ class AdminApiTests(unittest.TestCase):
         with self.assertRaises(admin_api.AdminError):
             admin_api.validate_profile_name("../secret")
 
+    def test_loopback_guard_rejects_public_bind_by_default(self):
+        self.assertTrue(admin_api.is_loopback_host("127.0.0.1"))
+        self.assertTrue(admin_api.is_loopback_host("localhost"))
+        self.assertFalse(admin_api.is_loopback_host("0.0.0.0"))
+
+    def test_client_namespace_ignores_advanced_secret_fields(self):
+        args = admin_api.client_namespace(
+            "main",
+            {
+                "comment": "ok",
+                "uuid": "forced-uuid",
+                "subId": "forced-sub",
+                "totalGb": 999,
+                "group": "forced",
+            },
+        )
+
+        self.assertEqual(args.email, "main")
+        self.assertEqual(args.comment, "ok")
+        self.assertIsNone(args.uuid)
+        self.assertIsNone(args.sub_id)
+        self.assertIsNone(args.total_gb)
+        self.assertIsNone(args.group)
+
     def test_list_profiles_hides_client_uuid(self):
         service = admin_api.AdminService(FakeApi(), {"public_host": "vpn.example.net"})
 
@@ -83,6 +110,7 @@ class AdminApiTests(unittest.TestCase):
 
         self.assertEqual(payload["profiles"][0]["email"], "main")
         self.assertNotIn("secret-uuid", json.dumps(payload))
+        self.assertNotIn("sub-main", json.dumps(payload))
 
     def test_profile_bundle_rewrites_public_host(self):
         service = admin_api.AdminService(FakeApi(), {"public_host": "vpn.example.net"})
@@ -121,6 +149,10 @@ class AdminApiTests(unittest.TestCase):
             with self.assertRaises(admin_api.AdminError):
                 service.backup_path("../x-ui-20260101-000000.db")
 
+    def test_static_path_rejects_traversal(self):
+        with self.assertRaises(admin_api.AdminError):
+            admin_api.static_path_for_request("/../admin_api.py")
+
     def test_create_and_list_backup(self):
         with tempfile.TemporaryDirectory() as tmp:
             service = admin_api.AdminService(FakeApi(), backup_dir=Path(tmp))
@@ -130,6 +162,45 @@ class AdminApiTests(unittest.TestCase):
 
             self.assertTrue(created["name"].startswith("x-ui-"))
             self.assertEqual(listed["backups"][0]["name"], created["name"])
+
+    def test_http_handler_serves_static_and_requires_token_for_api(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = admin_api.AdminService(
+                FakeApi(),
+                {"public_host": "vpn.example.net"},
+                backup_dir=Path(tmp),
+            )
+            server = ThreadingHTTPServer(
+                ("127.0.0.1", 0),
+                admin_api.make_handler(service, "test-token"),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base_url = f"http://127.0.0.1:{server.server_address[1]}"
+            try:
+                with request.urlopen(f"{base_url}/", timeout=5) as response:
+                    self.assertIn("text/html", response.headers["Content-Type"])
+                    self.assertIn("default-src 'self'", response.headers["Content-Security-Policy"])
+                with request.urlopen(f"{base_url}/app.js", timeout=5) as response:
+                    self.assertIn("application/javascript", response.headers["Content-Type"])
+                with request.urlopen(f"{base_url}/styles.css", timeout=5) as response:
+                    self.assertIn("text/css", response.headers["Content-Type"])
+
+                with self.assertRaises(error.HTTPError) as ctx:
+                    request.urlopen(f"{base_url}/api/v0/profiles", timeout=5)
+                self.assertEqual(ctx.exception.code, 401)
+
+                req = request.Request(
+                    f"{base_url}/api/v0/profiles",
+                    headers={"Authorization": "Bearer test-token"},
+                )
+                with request.urlopen(req, timeout=5) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(payload["profiles"][0]["email"], "main")
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
 
 
 if __name__ == "__main__":
