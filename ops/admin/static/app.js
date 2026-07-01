@@ -198,6 +198,14 @@ function renderProfileBundle(bundle) {
 function renderBackups(payload) {
   clear(state.backups);
   const backups = payload.backups || [];
+  const policy = payload.policy || {};
+  append(
+    state.backups,
+    el("p", {
+      className: "muted",
+      text: `Хранение: ${policy.retentionDays || "-"} дней, минимум ${policy.keepMin || "-"} шт. · Всего ${formatBytes(payload.totalSize || 0)}`,
+    }),
+  );
   if (!backups.length) {
     append(state.backups, el("p", { className: "muted", text: "Бэкапов нет" }));
     return;
@@ -210,9 +218,16 @@ function renderBackups(payload) {
     const button = el("button", {
       type: "button",
       text: "Скачать",
-      dataset: { backup: backup.name },
+      dataset: { backup: backup.name, backupAction: "download" },
     });
-    append(state.backups, el("div", { className: "backup-item" }, [info, button]));
+    const removeButton = el("button", {
+      className: "danger",
+      type: "button",
+      text: "Удалить",
+      dataset: { backup: backup.name, backupAction: "delete" },
+    });
+    const actions = el("div", { className: "actions" }, [button, removeButton]);
+    append(state.backups, el("div", { className: "backup-item" }, [info, actions]));
   });
 }
 
@@ -322,6 +337,31 @@ async function downloadBackup(name) {
   URL.revokeObjectURL(url);
 }
 
+async function deleteBackup(name) {
+  if (!window.confirm(`Удалить backup ${name}?`)) return;
+  const encodedName = encodeURIComponent(name);
+  await api(`/backups/${encodedName}?confirmName=${encodedName}`, { method: "DELETE" });
+  await refreshAll();
+  toast("Бэкап удалён");
+}
+
+async function pruneBackups() {
+  const preview = await api("/backups/prune", { method: "POST", body: JSON.stringify({ dryRun: true }) });
+  if (!preview.pruned.length) {
+    toast("Старых бэкапов для удаления нет");
+    return;
+  }
+  const size = formatBytes(preview.pruned.reduce((total, backup) => total + backup.size, 0));
+  const confirmed = window.confirm(`Удалить старые backup-файлы: ${preview.pruned.length} шт., ${size}?`);
+  if (!confirmed) return;
+  const result = await api("/backups/prune", {
+    method: "POST",
+    body: JSON.stringify({ dryRun: false, confirm: "prune" }),
+  });
+  await refreshAll();
+  toast(`Удалено старых бэкапов: ${result.pruned.length}`);
+}
+
 async function testAlert() {
   await api("/alerts/test", { method: "POST" });
   await refreshAll();
@@ -354,6 +394,7 @@ function bindEvents() {
   $("#refresh").addEventListener("click", () => refreshAll().catch((error) => toast(error.message)));
   $("#create-profile").addEventListener("click", () => createProfile().catch((error) => toast(error.message)));
   $("#create-backup").addEventListener("click", () => createBackup().catch((error) => toast(error.message)));
+  $("#prune-backups").addEventListener("click", () => pruneBackups().catch((error) => toast(error.message)));
   $("#test-alert").addEventListener("click", () => testAlert().catch((error) => toast(error.message)));
   $("#load-access").addEventListener("click", () => loadAccess().catch((error) => toast(error.message)));
   $("#open-panel").addEventListener("click", async () => {
@@ -380,6 +421,10 @@ function bindEvents() {
   $("#backups").addEventListener("click", (event) => {
     const button = event.target.closest("button[data-backup]");
     if (!button) return;
+    if (button.dataset.backupAction === "delete") {
+      deleteBackup(button.dataset.backup).catch((error) => toast(error.message));
+      return;
+    }
     downloadBackup(button.dataset.backup).catch((error) => toast(error.message));
   });
 

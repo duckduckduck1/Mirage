@@ -45,6 +45,14 @@ button:hover {
   border-color: var(--blue);
 }
 
+button.danger {
+  color: var(--red);
+}
+
+button.danger:hover {
+  border-color: rgba(255, 107, 107, 0.7);
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
