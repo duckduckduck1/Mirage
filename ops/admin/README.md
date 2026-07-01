@@ -1,7 +1,8 @@
 # Mirage Admin
 
-`ops/admin` — локальная панель и HTTP API для Mirage Admin. Сервис слушает
-`127.0.0.1`, требует `MIRAGE_ADMIN_TOKEN` для API и не открывается в `ufw`.
+`ops/admin` — локальная панель, HTTP API и Telegram alerts для Mirage Admin.
+Панель слушает `127.0.0.1`, требует `MIRAGE_ADMIN_TOKEN` для API и не
+открывается в `ufw`.
 
 ## Запуск на VPS
 
@@ -22,6 +23,23 @@ curl -H "Authorization: Bearer $MIRAGE_ADMIN_TOKEN" \
   http://127.0.0.1:8090/api/v0/health
 ```
 
+## Telegram alerts
+
+`mirage-alerts` запускается тем же compose-файлом. По умолчанию уведомления
+выключены и сервис ничего не отправляет. Для включения задай в
+`ops/admin/.env.local`:
+
+```env
+MIRAGE_ALERTS_ENABLED=true
+MIRAGE_ALERT_TELEGRAM_BOT_TOKEN=PASTE_BOT_TOKEN
+MIRAGE_ALERT_TELEGRAM_CHAT_ID=PASTE_CHAT_ID
+```
+
+Монитор проверяет доступность 3x-ui API, VLESS inbound, локальный порт `443`,
+директорию backup, свежесть последнего backup-файла и свободное место на диске.
+Уведомление отправляется только при переходе в деградацию или восстановление.
+Статус alerts и тестовое уведомление доступны из локальной панели.
+
 ## API v0.1
 
 | Метод | Путь | Назначение |
@@ -31,6 +49,8 @@ curl -H "Authorization: Bearer $MIRAGE_ADMIN_TOKEN" \
 | `GET` | `/api/v0/overview` | краткий статус для главного экрана |
 | `GET` | `/api/v0/access` | команды SSH-туннеля для админки и 3x-ui |
 | `GET` | `/api/v0/vpn/diagnostics` | безопасная диагностика VLESS Reality |
+| `GET` | `/api/v0/alerts` | безопасный статус Telegram alerts |
+| `POST` | `/api/v0/alerts/test` | отправить тестовое Telegram-уведомление |
 | `GET` | `/api/v0/profiles` | список профилей на VLESS inbound |
 | `POST` | `/api/v0/profiles` | создать профиль по `email` |
 | `GET` | `/api/v0/profiles/NAME` | ссылки и ручные поля клиента |
@@ -40,4 +60,4 @@ curl -H "Authorization: Bearer $MIRAGE_ADMIN_TOKEN" \
 | `POST` | `/api/v0/backups` | создать backup базы 3x-ui |
 | `GET` | `/api/v0/backups/FILE` | скачать backup |
 
-Restore и Telegram alerts добавляются отдельными этапами.
+Restore добавляется отдельным этапом.

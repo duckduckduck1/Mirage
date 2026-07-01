@@ -10,6 +10,8 @@ const state = {
   profiles: $("#profiles"),
   detail: $("#profile-detail"),
   backups: $("#backups"),
+  alertMetrics: $("#alert-metrics"),
+  alerts: $("#alerts"),
   access: $("#access"),
   toast: $("#toast"),
 };
@@ -214,12 +216,36 @@ function renderBackups(payload) {
   });
 }
 
+function renderAlerts(payload) {
+  clear(state.alertMetrics);
+  [
+    ["Статус", payload.enabled ? "включены" : "выключены"],
+    ["Telegram", payload.configured ? "настроен" : "не настроен"],
+    ["Последнее", payload.state?.updatedAt ? formatDate(payload.state.updatedAt) : "нет данных"],
+  ].forEach(([key, value]) => {
+    append(state.alertMetrics, el("div", {}, [el("dt", { text: key }), el("dd", { text: value })]));
+  });
+
+  clear(state.alerts);
+  Object.entries(payload.health?.checks || {}).forEach(([name, item]) => {
+    const ok = Boolean(item.ok);
+    append(
+      state.alerts,
+      el("div", { className: `check ${ok ? "ok" : "fail"}` }, [
+        el("span", { text: name }),
+        el("span", { text: ok ? "норма" : item.error || "ошибка" }),
+      ]),
+    );
+  });
+}
+
 async function refreshAll() {
   const tasks = [
     ["Обзор", api("/overview"), renderOverview],
     ["Состояние", api("/health"), renderHealth],
     ["Профили", api("/profiles"), renderProfiles],
     ["Бэкапы", api("/backups"), renderBackups],
+    ["Alerts", api("/alerts"), renderAlerts],
   ];
   const results = await Promise.all(
     tasks.map(async ([label, promise, render]) => {
@@ -296,6 +322,12 @@ async function downloadBackup(name) {
   URL.revokeObjectURL(url);
 }
 
+async function testAlert() {
+  await api("/alerts/test", { method: "POST" });
+  await refreshAll();
+  toast("Тестовое уведомление отправлено");
+}
+
 async function copyText(value) {
   if (!value) return;
   await navigator.clipboard.writeText(value);
@@ -322,6 +354,7 @@ function bindEvents() {
   $("#refresh").addEventListener("click", () => refreshAll().catch((error) => toast(error.message)));
   $("#create-profile").addEventListener("click", () => createProfile().catch((error) => toast(error.message)));
   $("#create-backup").addEventListener("click", () => createBackup().catch((error) => toast(error.message)));
+  $("#test-alert").addEventListener("click", () => testAlert().catch((error) => toast(error.message)));
   $("#load-access").addEventListener("click", () => loadAccess().catch((error) => toast(error.message)));
   $("#open-panel").addEventListener("click", async () => {
     try {
