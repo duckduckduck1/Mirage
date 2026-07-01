@@ -1,12 +1,18 @@
-# Mirage Admin API
+# Mirage Admin
 
-`ops/admin` — локальный HTTP API для будущей панели Mirage Admin. Сервис
-слушает `127.0.0.1`, требует `MIRAGE_ADMIN_TOKEN` и не открывается в `ufw`.
+`ops/admin` — локальная панель и HTTP API для Mirage Admin. Сервис слушает
+`127.0.0.1`, требует `MIRAGE_ADMIN_TOKEN` для API и не открывается в `ufw`.
 
 ## Запуск на VPS
 
 ```bash
 sudo docker compose --env-file ops/admin/.env.local -f ops/admin/compose.yml up -d --build
+```
+
+Страница доступна после SSH-туннеля:
+
+```text
+http://127.0.0.1:8090/
 ```
 
 Проверка:
@@ -34,4 +40,4 @@ curl -H "Authorization: Bearer $MIRAGE_ADMIN_TOKEN" \
 | `POST` | `/api/v0/backups` | создать backup базы 3x-ui |
 | `GET` | `/api/v0/backups/FILE` | скачать backup |
 
-Restore, UI и Telegram alerts добавляются отдельными этапами.
+Restore и Telegram alerts добавляются отдельными этапами.

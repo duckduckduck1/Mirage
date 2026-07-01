@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Local Mirage Admin API.
+"""Local Mirage Admin API and static UI.
 
 The service is intentionally small and dependency-free. It exposes a localhost
-JSON API for the future admin UI while reusing xui-ops for all 3x-ui behavior.
+JSON API and a static admin page while reusing xui-ops for all 3x-ui behavior.
 """
 
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -29,10 +30,18 @@ import xui_api  # noqa: E402
 
 
 PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$")
-BACKUP_RE = re.compile(r"^x-ui-\d{8}-\d{6}\.db$")
+BACKUP_RE = re.compile(r"^x-ui-\d{8}-\d{6}(?:-\d{3})?\.db$")
 DEFAULT_ADMIN_HOST = "127.0.0.1"
 DEFAULT_ADMIN_PORT = 8090
 DEFAULT_BACKUP_DIR = Path("/data/backups")
+STATIC_DIR = CURRENT_DIR / "static"
+CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+}
 
 
 class AdminError(RuntimeError):
@@ -50,6 +59,16 @@ def validate_profile_name(value: str) -> str:
             "profile name must be 1-64 chars: letters, digits, dot, underscore, at or dash",
         )
     return name
+
+
+def is_loopback_host(host: str) -> bool:
+    normalized = host.strip().lower()
+    if normalized in {"localhost"}:
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 def load_runtime_env() -> None:
@@ -83,19 +102,19 @@ def client_namespace(email: str, payload: dict[str, Any]) -> argparse.Namespace:
     return argparse.Namespace(
         email=email,
         comment=payload.get("comment"),
-        group=payload.get("group"),
+        group=None,
         inbound_id=None,
         inbound_remark=None,
         protocol=None,
         port=None,
-        total_gb=payload.get("totalGb"),
-        expiry_days=payload.get("expiryDays"),
-        expiry_time_ms=payload.get("expiryTimeMs"),
-        limit_ip=payload.get("limitIp"),
-        reset_days=payload.get("resetDays"),
-        tg_id=payload.get("tgId"),
-        sub_id=payload.get("subId"),
-        uuid=payload.get("uuid"),
+        total_gb=None,
+        expiry_days=None,
+        expiry_time_ms=None,
+        limit_ip=None,
+        reset_days=None,
+        tg_id=None,
+        sub_id=None,
+        uuid=None,
         password=None,
         auth=None,
         flow=None,
@@ -105,6 +124,18 @@ def client_namespace(email: str, payload: dict[str, Any]) -> argparse.Namespace:
 
 def json_object(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def static_path_for_request(raw_path: str, static_dir: Path = STATIC_DIR) -> Path:
+    path = parse.unquote(parse.urlsplit(raw_path).path)
+    relative = "index.html" if path in {"", "/"} else path.lstrip("/")
+    candidate = (static_dir / relative).resolve()
+    root = static_dir.resolve()
+    if candidate != root and root not in candidate.parents:
+        raise AdminError(HTTPStatus.BAD_REQUEST, "invalid static path")
+    if candidate.is_dir():
+        candidate = candidate / "index.html"
+    return candidate
 
 
 class AdminService:
@@ -166,7 +197,6 @@ class AdminService:
                     "totalGB": client.get("totalGB"),
                     "expiryTime": client.get("expiryTime"),
                     "limitIp": client.get("limitIp"),
-                    "subId": client.get("subId"),
                     "group": client.get("group"),
                     "comment": client.get("comment"),
                 }
@@ -245,7 +275,14 @@ class AdminService:
 
     def create_backup(self) -> dict[str, Any]:
         self.backup_dir.mkdir(parents=True, exist_ok=True)
-        path = self.backup_dir / f"x-ui-{time.strftime('%Y%m%d-%H%M%S')}.db"
+        base_name = f"x-ui-{time.strftime('%Y%m%d-%H%M%S')}"
+        path = self.backup_dir / f"{base_name}.db"
+        for index in range(1000):
+            if not path.exists():
+                break
+            path = self.backup_dir / f"{base_name}-{index:03d}.db"
+        else:
+            raise AdminError(HTTPStatus.CONFLICT, "could not allocate a unique backup name")
         path.write_bytes(self.api.download("/panel/api/server/getDb"))
         path.chmod(0o600)
         stat = path.stat()
@@ -311,6 +348,21 @@ def make_handler(service: AdminService, token: str) -> type[BaseHTTPRequestHandl
         def _send_error(self, status: HTTPStatus, message: str) -> None:
             self._send_json(status, {"error": message})
 
+        def _send_static(self) -> None:
+            path_obj = static_path_for_request(self.path)
+            if not path_obj.is_file():
+                raise AdminError(HTTPStatus.NOT_FOUND, "not found")
+            data = path_obj.read_bytes()
+            content_type = CONTENT_TYPES.get(path_obj.suffix.lower(), "application/octet-stream")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(data)
+
         def _route(self, method: str) -> None:
             parsed = parse.urlsplit(self.path)
             path = parsed.path.rstrip("/") or "/"
@@ -318,6 +370,10 @@ def make_handler(service: AdminService, token: str) -> type[BaseHTTPRequestHandl
 
             if method == "GET" and parts == ["healthz"]:
                 self._send_json(HTTPStatus.OK, {"status": "ok"})
+                return
+
+            if method == "GET" and parts[:2] != ["api", "v0"]:
+                self._send_static()
                 return
 
             if parts[:2] != ["api", "v0"]:
@@ -390,7 +446,7 @@ def make_handler(service: AdminService, token: str) -> type[BaseHTTPRequestHandl
             except AdminError as exc:
                 self._send_error(exc.status, exc.message)
             except xui_api.ApiError as exc:
-                self._send_error(HTTPStatus.BAD_GATEWAY, str(exc))
+                self._send_error(HTTPStatus.BAD_GATEWAY, "upstream 3x-ui API request failed")
             except Exception as exc:  # noqa: BLE001
                 self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
 
@@ -415,6 +471,8 @@ def serve() -> None:
     if not token:
         raise SystemExit("MIRAGE_ADMIN_TOKEN is required")
     host = os.environ.get("MIRAGE_ADMIN_HOST", DEFAULT_ADMIN_HOST)
+    if not is_loopback_host(host) and os.environ.get("MIRAGE_ADMIN_ALLOW_PUBLIC") != "1":
+        raise SystemExit("MIRAGE_ADMIN_HOST must be loopback unless MIRAGE_ADMIN_ALLOW_PUBLIC=1 is set")
     port = int(os.environ.get("MIRAGE_ADMIN_PORT", DEFAULT_ADMIN_PORT))
     server = ThreadingHTTPServer((host, port), make_handler(service, token))
     print(f"Mirage Admin API listening on http://{host}:{port}", flush=True)
