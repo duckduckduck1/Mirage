@@ -42,34 +42,5 @@ jobs:
           node --version
           docker compose version
 
-      - name: Run Python tests
-        run: python -m unittest ops.admin.test_admin_api ops.xui.test_xui_api
-
-      - name: Compile Python entrypoints
-        run: |
-          python -m py_compile \
-            ops/admin/admin_api.py \
-            ops/admin/restore_helper.py \
-            ops/xui/xui_api.py
-
-      - name: Check admin UI JavaScript
-        run: node --check ops/admin/static/app.js
-
-      - name: Check deploy shell syntax
-        run: bash -n ops/vpn/deploy.sh
-
-      - name: Prepare compose env files
-        run: |
-          cp ops/xui/.env.example ops/xui/.env.local
-          cp ops/admin/.env.example ops/admin/.env.local
-          mkdir -p backups .local/restore-requests .local/restore-status .local/admin-alerts
-
-      - name: Validate Docker Compose config
-        run: |
-          docker compose -f ops/xui/compose.yml config
-          docker compose --env-file ops/admin/.env.local -f ops/admin/compose.yml config
-
-      - name: Build Docker images
-        run: |
-          docker compose -f ops/xui/compose.yml build
-          docker compose --env-file ops/admin/.env.local -f ops/admin/compose.yml build
+      - name: Run release gate
+        run: bash ops/release/check-local.sh
