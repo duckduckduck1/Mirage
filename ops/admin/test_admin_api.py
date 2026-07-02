@@ -1,4 +1,5 @@
 import json
+import io
 import os
 import sqlite3
 import sys
@@ -95,6 +96,12 @@ class FakeApi:
         return self.downloaded
 
 
+class FakeBodyHandler:
+    def __init__(self, content_length: str, body: bytes) -> None:
+        self.headers = {"Content-Length": content_length}
+        self.rfile = io.BytesIO(body)
+
+
 class FakeNotifier:
     def __init__(self):
         self.messages = []
@@ -152,6 +159,29 @@ class AdminApiTests(unittest.TestCase):
         self.assertTrue(admin_api.is_loopback_host("127.0.0.1"))
         self.assertTrue(admin_api.is_loopback_host("localhost"))
         self.assertFalse(admin_api.is_loopback_host("0.0.0.0"))
+
+    def test_validate_admin_token_rejects_weak_values(self):
+        for token in ["", "short-token", "CHANGE_ME_LONG_RANDOM_TOKEN"]:
+            with self.subTest(token=token):
+                with self.assertRaises(admin_api.AdminError):
+                    admin_api.validate_admin_token(token)
+
+        strong = "0123456789abcdef0123456789abcdef"
+        self.assertEqual(admin_api.validate_admin_token(f" {strong} "), strong)
+
+    def test_read_json_body_rejects_bad_length_and_large_body(self):
+        with self.assertRaises(admin_api.AdminError) as bad_length:
+            admin_api.read_json_body(FakeBodyHandler("not-a-number", b"{}"))
+        self.assertEqual(bad_length.exception.status, admin_api.HTTPStatus.BAD_REQUEST)
+
+        with self.assertRaises(admin_api.AdminError) as negative_length:
+            admin_api.read_json_body(FakeBodyHandler("-1", b"{}"))
+        self.assertEqual(negative_length.exception.status, admin_api.HTTPStatus.BAD_REQUEST)
+
+        large_body = b'{"value":"' + (b"x" * admin_api.DEFAULT_JSON_BODY_MAX_BYTES) + b'"}'
+        with self.assertRaises(admin_api.AdminError) as too_large:
+            admin_api.read_json_body(FakeBodyHandler(str(len(large_body)), large_body))
+        self.assertEqual(too_large.exception.status, admin_api.HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
 
     def test_client_namespace_ignores_advanced_secret_fields(self):
         args = admin_api.client_namespace(
@@ -566,6 +596,38 @@ class AdminApiTests(unittest.TestCase):
                 with self.assertRaises(error.HTTPError) as ctx:
                     request.urlopen(f"{base_url}/api/v0/profiles", timeout=5)
                 self.assertEqual(ctx.exception.code, 401)
+
+                for headers in [
+                    {"Authorization": "Bearer wrong-token"},
+                    {"Authorization": "test-token"},
+                    {"X-Mirage-Token": "wrong-token"},
+                ]:
+                    with self.subTest(headers=headers):
+                        invalid_req = request.Request(f"{base_url}/api/v0/profiles", headers=headers)
+                        with self.assertRaises(error.HTTPError) as invalid_ctx:
+                            request.urlopen(invalid_req, timeout=5)
+                        self.assertEqual(invalid_ctx.exception.code, 401)
+
+                x_token_req = request.Request(
+                    f"{base_url}/api/v0/profiles",
+                    headers={"X-Mirage-Token": "test-token"},
+                )
+                with request.urlopen(x_token_req, timeout=5) as response:
+                    self.assertEqual(response.status, 200)
+
+                large_profile_body = b'{"email":"' + (b"x" * admin_api.DEFAULT_JSON_BODY_MAX_BYTES) + b'"}'
+                large_req = request.Request(
+                    f"{base_url}/api/v0/profiles",
+                    data=large_profile_body,
+                    headers={
+                        "Authorization": "Bearer test-token",
+                        "Content-Type": "application/json",
+                    },
+                    method="POST",
+                )
+                with self.assertRaises(error.HTTPError) as large_ctx:
+                    request.urlopen(large_req, timeout=5)
+                self.assertEqual(large_ctx.exception.code, 413)
 
                 req = request.Request(
                     f"{base_url}/api/v0/profiles",
