@@ -544,6 +544,8 @@ class AdminApiTests(unittest.TestCase):
                 FakeApi(),
                 {"public_host": "vpn.example.net"},
                 backup_dir=Path(tmp),
+                restore_request_dir=Path(tmp) / "restore-requests",
+                restore_status_dir=Path(tmp) / "restore-status",
             )
             server = ThreadingHTTPServer(
                 ("127.0.0.1", 0),
