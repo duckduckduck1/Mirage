@@ -43,6 +43,7 @@ DEFAULT_RESTORE_STATUS_DIR = Path("/data/restore-status")
 DEFAULT_BACKUP_RETENTION_DAYS = 14
 DEFAULT_BACKUP_KEEP_MIN = 3
 DEFAULT_BACKUP_IMPORT_MAX_MB = 64
+DEFAULT_JSON_BODY_MAX_BYTES = 64 * 1024
 DEFAULT_ALERT_INTERVAL_SECONDS = 60
 DEFAULT_ALERT_STATE_FILE = Path("/data/alerts/state.json")
 DEFAULT_ALERT_BACKUP_MAX_AGE_HOURS = 36
@@ -55,6 +56,15 @@ CONTENT_TYPES = {
     ".json": "application/json; charset=utf-8",
     ".svg": "image/svg+xml",
 }
+WEAK_ADMIN_TOKENS = {
+    "change_me",
+    "change_me_long_random_token",
+    "changeme",
+    "password",
+    "secret",
+    "token",
+}
+MIN_ADMIN_TOKEN_LENGTH = 32
 
 
 class AdminError(RuntimeError):
@@ -89,6 +99,17 @@ def env_flag(name: str, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def validate_admin_token(token: str) -> str:
+    normalized = token.strip()
+    if not normalized:
+        raise AdminError(HTTPStatus.INTERNAL_SERVER_ERROR, "MIRAGE_ADMIN_TOKEN is required")
+    if len(normalized) < MIN_ADMIN_TOKEN_LENGTH:
+        raise AdminError(HTTPStatus.INTERNAL_SERVER_ERROR, "MIRAGE_ADMIN_TOKEN is too short")
+    if normalized.lower() in WEAK_ADMIN_TOKENS:
+        raise AdminError(HTTPStatus.INTERNAL_SERVER_ERROR, "MIRAGE_ADMIN_TOKEN uses a placeholder value")
+    return normalized
 
 
 def env_int(name: str, default: int, minimum: int = 0) -> int:
@@ -767,10 +788,17 @@ def run_alert_monitor(
         time.sleep(interval_seconds)
 
 
-def read_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
-    length = int(handler.headers.get("Content-Length") or 0)
-    if length <= 0:
+def read_json_body(handler: BaseHTTPRequestHandler, max_bytes: int = DEFAULT_JSON_BODY_MAX_BYTES) -> dict[str, Any]:
+    try:
+        length = int(handler.headers.get("Content-Length") or 0)
+    except ValueError as exc:
+        raise AdminError(HTTPStatus.BAD_REQUEST, "invalid Content-Length") from exc
+    if length < 0:
+        raise AdminError(HTTPStatus.BAD_REQUEST, "invalid Content-Length")
+    if length == 0:
         return {}
+    if length > max_bytes:
+        raise AdminError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "JSON body is too large")
     raw = handler.rfile.read(length)
     try:
         parsed = json.loads(raw.decode("utf-8"))
@@ -803,7 +831,11 @@ def make_handler(service: AdminService, token: str) -> type[BaseHTTPRequestHandl
         def _authorized(self) -> bool:
             bearer = self.headers.get("Authorization", "")
             header_token = self.headers.get("X-Mirage-Token", "")
-            return bearer == f"Bearer {token}" or header_token == token
+            bearer_prefix = "Bearer "
+            bearer_token = bearer[len(bearer_prefix) :] if bearer.startswith(bearer_prefix) else ""
+            bearer_ok = secrets.compare_digest(bearer_token, token)
+            header_ok = secrets.compare_digest(header_token, token)
+            return bearer_ok or header_ok
 
         def _send_json(self, status: HTTPStatus, payload: Any) -> None:
             body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
@@ -973,9 +1005,10 @@ def build_service() -> AdminService:
 
 def serve() -> None:
     service = build_service()
-    token = os.environ.get("MIRAGE_ADMIN_TOKEN", "").strip()
-    if not token:
-        raise SystemExit("MIRAGE_ADMIN_TOKEN is required")
+    try:
+        token = validate_admin_token(os.environ.get("MIRAGE_ADMIN_TOKEN", ""))
+    except AdminError as exc:
+        raise SystemExit(exc.message) from exc
     host = os.environ.get("MIRAGE_ADMIN_HOST", DEFAULT_ADMIN_HOST)
     if not is_loopback_host(host) and os.environ.get("MIRAGE_ADMIN_ALLOW_PUBLIC") != "1":
         raise SystemExit("MIRAGE_ADMIN_HOST must be loopback unless MIRAGE_ADMIN_ALLOW_PUBLIC=1 is set")
