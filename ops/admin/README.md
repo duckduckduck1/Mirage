@@ -23,6 +23,28 @@ curl -H "Authorization: Bearer $MIRAGE_ADMIN_TOKEN" \
   http://127.0.0.1:8090/api/v0/health
 ```
 
+## Runtime user
+
+Контейнеры `mirage-admin` и `mirage-alerts` запускаются без root. Compose берёт
+UID/GID из `ops/admin/.env.local`:
+
+```env
+MIRAGE_ADMIN_UID=1000
+MIRAGE_ADMIN_GID=1000
+```
+
+`ops/vpn/deploy.sh` заполняет эти значения автоматически по пользователю,
+которому принадлежит `/home/mirage/mirage-vpn`.
+
+При ручном запуске без `ops/vpn/deploy.sh` сначала создай host-директории и
+передай их тому же UID/GID, под которым стартует контейнер:
+
+```bash
+sudo install -d -m 700 -o "$MIRAGE_ADMIN_UID" -g "$MIRAGE_ADMIN_GID" \
+  /home/mirage/mirage-vpn/backups \
+  /home/mirage/mirage-vpn/alerts
+```
+
 ## Telegram alerts
 
 `mirage-alerts` запускается тем же compose-файлом. По умолчанию уведомления
