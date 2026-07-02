@@ -6,6 +6,7 @@ services:
     image: mirage-admin:local
     container_name: mirage-admin
     network_mode: host
+    user: "${MIRAGE_ADMIN_UID:-10001}:${MIRAGE_ADMIN_GID:-10001}"
     restart: unless-stopped
     env_file:
       - ../xui/.env.local
@@ -22,6 +23,7 @@ services:
     image: mirage-admin:local
     container_name: mirage-alerts
     network_mode: host
+    user: "${MIRAGE_ADMIN_UID:-10001}:${MIRAGE_ADMIN_GID:-10001}"
     restart: unless-stopped
     command: ["monitor"]
     env_file:

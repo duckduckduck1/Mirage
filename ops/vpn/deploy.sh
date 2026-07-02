@@ -52,6 +52,16 @@ user_home() {
   getent passwd "$user" | cut -d: -f6
 }
 
+user_uid() {
+  local user="$1"
+  id -u "$user"
+}
+
+user_gid() {
+  local user="$1"
+  id -g "$user"
+}
+
 detect_public_host() {
   local host="${MIRAGE_VPN_PUBLIC_HOST:-${1:-}}"
   if [[ -n "$host" && "$host" != "SERVER_IP" && "$host" != "SERVER_HOST_OR_DOMAIN" ]]; then
@@ -230,6 +240,10 @@ write_admin_env() {
   fi
   admin_token="${admin_token:-${MIRAGE_ADMIN_TOKEN:-$(random_hex 24)}}"
 
+  local admin_uid admin_gid
+  admin_uid="${MIRAGE_ADMIN_UID:-$ADMIN_RUNTIME_UID}"
+  admin_gid="${MIRAGE_ADMIN_GID:-$ADMIN_RUNTIME_GID}"
+
   local backup_retention_days backup_keep_min
   backup_retention_days="${MIRAGE_ADMIN_BACKUP_RETENTION_DAYS:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_BACKUP_RETENTION_DAYS || true)}"
   backup_keep_min="${MIRAGE_ADMIN_BACKUP_KEEP_MIN:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_BACKUP_KEEP_MIN || true)}"
@@ -246,6 +260,8 @@ write_admin_env() {
 MIRAGE_ADMIN_HOST=127.0.0.1
 MIRAGE_ADMIN_PORT=${MIRAGE_ADMIN_PORT:-$DEFAULT_ADMIN_PORT}
 MIRAGE_ADMIN_TOKEN=${admin_token}
+MIRAGE_ADMIN_UID=${admin_uid}
+MIRAGE_ADMIN_GID=${admin_gid}
 MIRAGE_ADMIN_BACKUP_DIR_HOST=$BACKUP_DIR
 MIRAGE_ADMIN_BACKUP_RETENTION_DAYS=${backup_retention_days:-14}
 MIRAGE_ADMIN_BACKUP_KEEP_MIN=${backup_keep_min:-3}
@@ -348,9 +364,9 @@ for path in backups[keep_min:]:
 PY
 chmod 700 "$BACKUP_DIR"
 chmod 600 "$BACKUP_DIR"/x-ui-*.db 2>/dev/null || true
-if id "$RUNTIME_USER" >/dev/null 2>&1 && [ "$RUNTIME_USER" != "root" ]; then
-  chown -R "$RUNTIME_USER:$RUNTIME_USER" "$BACKUP_DIR"
-fi
+backup_owner_uid="\${MIRAGE_ADMIN_UID:-$ADMIN_RUNTIME_UID}"
+backup_owner_gid="\${MIRAGE_ADMIN_GID:-$ADMIN_RUNTIME_GID}"
+chown -R "\$backup_owner_uid:\$backup_owner_gid" "$BACKUP_DIR"
 EOF
   chmod 700 /usr/local/bin/mirage-xui-backup
 
@@ -440,9 +456,7 @@ render_access_file() {
 }
 
 fix_output_owner() {
-  if [[ "$RUNTIME_USER" != "root" ]]; then
-    chown -R "$RUNTIME_USER:$RUNTIME_USER" "$OUTPUT_DIR"
-  fi
+  chown -R "$ADMIN_RUNTIME_UID:$ADMIN_RUNTIME_GID" "$OUTPUT_DIR"
 }
 
 main() {
@@ -450,6 +464,22 @@ main() {
 
   PUBLIC_HOST="$(detect_public_host "${1:-}")"
   RUNTIME_USER="$(detect_runtime_user)"
+  ADMIN_RUNTIME_UID="${MIRAGE_ADMIN_UID:-}"
+  ADMIN_RUNTIME_GID="${MIRAGE_ADMIN_GID:-}"
+  if [[ -z "$ADMIN_RUNTIME_UID" ]]; then
+    if [[ "$RUNTIME_USER" == "root" ]]; then
+      ADMIN_RUNTIME_UID="10001"
+    else
+      ADMIN_RUNTIME_UID="$(user_uid "$RUNTIME_USER")"
+    fi
+  fi
+  if [[ -z "$ADMIN_RUNTIME_GID" ]]; then
+    if [[ "$RUNTIME_USER" == "root" ]]; then
+      ADMIN_RUNTIME_GID="10001"
+    else
+      ADMIN_RUNTIME_GID="$(user_gid "$RUNTIME_USER")"
+    fi
+  fi
   RUNTIME_HOME="$(user_home "$RUNTIME_USER")"
   [[ -n "$RUNTIME_HOME" ]] || RUNTIME_HOME="/root"
   OUTPUT_DIR="${MIRAGE_VPN_OUTPUT_DIR:-$RUNTIME_HOME/mirage-vpn}"
@@ -458,6 +488,7 @@ main() {
   mkdir -p "$OUTPUT_DIR" "$BACKUP_DIR"
   mkdir -p "$OUTPUT_DIR/alerts"
   chmod 700 "$OUTPUT_DIR" "$BACKUP_DIR" "$OUTPUT_DIR/alerts"
+  fix_output_owner
 
   log "Deploying Mirage VPN for host: $PUBLIC_HOST"
   log "Access bundle: $OUTPUT_DIR"

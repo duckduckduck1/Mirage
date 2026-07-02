@@ -14,6 +14,8 @@ from urllib.parse import quote as parse_quote
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import admin_api
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 class FakeApi:
     def __init__(self):
@@ -106,6 +108,23 @@ class FakeAlertService:
 
 
 class AdminApiTests(unittest.TestCase):
+    def test_admin_container_uses_non_root_user(self):
+        dockerfile = (REPO_ROOT / "ops/admin/Dockerfile").read_text(encoding="utf-8")
+        compose = (REPO_ROOT / "ops/admin/compose.yml").read_text(encoding="utf-8")
+
+        self.assertIn("USER 10001:10001", dockerfile)
+        self.assertIn('user: "${MIRAGE_ADMIN_UID:-10001}:${MIRAGE_ADMIN_GID:-10001}"', compose)
+
+    def test_deploy_writes_admin_uid_gid(self):
+        deploy = (REPO_ROOT / "ops/vpn/deploy.sh").read_text(encoding="utf-8")
+
+        self.assertIn("MIRAGE_ADMIN_UID=${admin_uid}", deploy)
+        self.assertIn("MIRAGE_ADMIN_GID=${admin_gid}", deploy)
+        self.assertIn('ADMIN_RUNTIME_UID="${MIRAGE_ADMIN_UID:-}"', deploy)
+        self.assertNotIn('ADMIN_RUNTIME_UID="${MIRAGE_ADMIN_UID:-$(env_file_value', deploy)
+        self.assertIn('backup_owner_uid="\\${MIRAGE_ADMIN_UID:-$ADMIN_RUNTIME_UID}"', deploy)
+        self.assertIn('chown -R "$ADMIN_RUNTIME_UID:$ADMIN_RUNTIME_GID" "$OUTPUT_DIR"', deploy)
+
     def test_validate_profile_name_rejects_path_like_values(self):
         with self.assertRaises(admin_api.AdminError):
             admin_api.validate_profile_name("../secret")
