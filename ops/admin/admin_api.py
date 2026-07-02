@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import socket
+import sqlite3
 import sys
 import time
 from http import HTTPStatus
@@ -37,6 +38,7 @@ DEFAULT_ADMIN_PORT = 8090
 DEFAULT_BACKUP_DIR = Path("/data/backups")
 DEFAULT_BACKUP_RETENTION_DAYS = 14
 DEFAULT_BACKUP_KEEP_MIN = 3
+DEFAULT_BACKUP_IMPORT_MAX_MB = 64
 DEFAULT_ALERT_INTERVAL_SECONDS = 60
 DEFAULT_ALERT_STATE_FILE = Path("/data/alerts/state.json")
 DEFAULT_ALERT_BACKUP_MAX_AGE_HOURS = 36
@@ -172,6 +174,10 @@ def backup_policy() -> dict[str, int]:
     }
 
 
+def backup_import_max_bytes() -> int:
+    return env_int("MIRAGE_ADMIN_BACKUP_IMPORT_MAX_MB", DEFAULT_BACKUP_IMPORT_MAX_MB, minimum=1) * 1024 * 1024
+
+
 def backup_info(path: Path) -> dict[str, Any]:
     stat = path.stat()
     return {"name": path.name, "size": stat.st_size, "mtime": int(stat.st_mtime)}
@@ -185,6 +191,31 @@ def backup_policy_value(payload: dict[str, Any], key: str, default: int) -> int:
         return int(raw)
     except (TypeError, ValueError) as exc:
         raise AdminError(HTTPStatus.BAD_REQUEST, "retentionDays and keepMin must be integers") from exc
+
+
+def validate_sqlite_backup(path: Path) -> None:
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise AdminError(HTTPStatus.BAD_REQUEST, f"backup file is not readable: {exc}") from exc
+    if size <= 0:
+        raise AdminError(HTTPStatus.BAD_REQUEST, "backup file is empty")
+    try:
+        header = path.read_bytes()[:16]
+    except OSError as exc:
+        raise AdminError(HTTPStatus.BAD_REQUEST, f"backup file is not readable: {exc}") from exc
+    if header != b"SQLite format 3\x00":
+        raise AdminError(HTTPStatus.BAD_REQUEST, "backup file must be a SQLite database")
+    try:
+        connection = sqlite3.connect(str(path))
+        try:
+            row = connection.execute("PRAGMA integrity_check").fetchone()
+        finally:
+            connection.close()
+    except sqlite3.DatabaseError as exc:
+        raise AdminError(HTTPStatus.BAD_REQUEST, f"backup SQLite integrity check failed: {exc}") from exc
+    if not row or str(row[0]).lower() != "ok":
+        raise AdminError(HTTPStatus.BAD_REQUEST, "backup SQLite integrity check failed")
 
 
 class AdminService:
@@ -325,6 +356,9 @@ class AdminService:
         }
 
     def create_backup(self) -> dict[str, Any]:
+        return self.store_backup_bytes(self.api.download("/panel/api/server/getDb"))
+
+    def allocate_backup_path(self) -> Path:
         self.backup_dir.mkdir(parents=True, exist_ok=True)
         self.backup_dir.chmod(0o700)
         base_name = f"x-ui-{time.strftime('%Y%m%d-%H%M%S')}"
@@ -335,10 +369,28 @@ class AdminService:
             path = self.backup_dir / f"{base_name}-{index:03d}.db"
         else:
             raise AdminError(HTTPStatus.CONFLICT, "could not allocate a unique backup name")
-        path.write_bytes(self.api.download("/panel/api/server/getDb"))
+        return path
+
+    def store_backup_bytes(self, data: bytes) -> dict[str, Any]:
+        path = self.allocate_backup_path()
+        temp_path = path.with_name(f".{path.name}.uploading")
+        try:
+            temp_path.write_bytes(data)
+            validate_sqlite_backup(temp_path)
+            temp_path.replace(path)
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
         path.chmod(0o600)
         stat = path.stat()
         return {"name": path.name, "size": stat.st_size, "mtime": int(stat.st_mtime)}
+
+    def import_backup(self, data: bytes) -> dict[str, Any]:
+        if not data:
+            raise AdminError(HTTPStatus.BAD_REQUEST, "backup upload is empty")
+        if len(data) > backup_import_max_bytes():
+            raise AdminError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "backup upload is too large")
+        return self.store_backup_bytes(data)
 
     def backup_files(self) -> list[Path]:
         self.backup_dir.mkdir(parents=True, exist_ok=True)
@@ -637,6 +689,18 @@ def read_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     return parsed
 
 
+def read_raw_body(handler: BaseHTTPRequestHandler, max_bytes: int) -> bytes:
+    try:
+        length = int(handler.headers.get("Content-Length") or 0)
+    except ValueError as exc:
+        raise AdminError(HTTPStatus.BAD_REQUEST, "invalid Content-Length") from exc
+    if length <= 0:
+        raise AdminError(HTTPStatus.BAD_REQUEST, "request body is empty")
+    if length > max_bytes:
+        raise AdminError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "request body is too large")
+    return handler.rfile.read(length)
+
+
 def make_handler(service: AdminService, token: str) -> type[BaseHTTPRequestHandler]:
     class MirageAdminHandler(BaseHTTPRequestHandler):
         server_version = "MirageAdmin/0.1"
@@ -733,6 +797,9 @@ def make_handler(service: AdminService, token: str) -> type[BaseHTTPRequestHandl
                 return
             if method == "POST" and route == ["backups"]:
                 self._send_json(HTTPStatus.CREATED, service.create_backup())
+                return
+            if method == "POST" and route == ["backups", "import"]:
+                self._send_json(HTTPStatus.CREATED, service.import_backup(read_raw_body(self, backup_import_max_bytes())))
                 return
             if method == "POST" and route == ["backups", "prune"]:
                 self._send_json(HTTPStatus.OK, service.prune_backups(read_json_body(self)))

@@ -323,6 +323,18 @@ async function createBackup() {
   toast(`Бэкап создан: ${backup.name}`);
 }
 
+async function importBackup(file) {
+  if (!file) return;
+  if (!window.confirm(`Импортировать backup ${file.name}?`)) return;
+  const backup = await api("/backups/import", {
+    method: "POST",
+    body: await file.arrayBuffer(),
+    headers: { "Content-Type": "application/octet-stream" },
+  });
+  await refreshAll();
+  toast(`Бэкап импортирован: ${backup.name}`);
+}
+
 async function downloadBackup(name) {
   const blob = await api(`/backups/${encodeURIComponent(name)}`, {
     headers: { "Content-Type": "application/octet-stream" },
@@ -394,6 +406,15 @@ function bindEvents() {
   $("#refresh").addEventListener("click", () => refreshAll().catch((error) => toast(error.message)));
   $("#create-profile").addEventListener("click", () => createProfile().catch((error) => toast(error.message)));
   $("#create-backup").addEventListener("click", () => createBackup().catch((error) => toast(error.message)));
+  $("#import-backup").addEventListener("click", () => $("#backup-file").click());
+  $("#backup-file").addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    importBackup(file)
+      .catch((error) => toast(error.message))
+      .finally(() => {
+        event.target.value = "";
+      });
+  });
   $("#prune-backups").addEventListener("click", () => pruneBackups().catch((error) => toast(error.message)));
   $("#test-alert").addEventListener("click", () => testAlert().catch((error) => toast(error.message)));
   $("#load-access").addEventListener("click", () => loadAccess().catch((error) => toast(error.message)));

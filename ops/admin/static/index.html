@@ -74,7 +74,9 @@
             <h2>Бэкапы</h2>
             <div class="actions">
               <button id="prune-backups" type="button">Очистить старые</button>
+              <button id="import-backup" type="button">Импортировать</button>
               <button id="create-backup" type="button">Создать</button>
+              <input id="backup-file" class="visually-hidden" type="file" accept=".db,application/vnd.sqlite3,application/octet-stream">
             </div>
           </div>
           <div class="backup-list" id="backups"></div>
