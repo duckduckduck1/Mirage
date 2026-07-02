@@ -9,6 +9,7 @@ XUI_COMPOSE_FILE="$XUI_OPS_DIR/compose.yml"
 ADMIN_DIR="$REPO_ROOT/ops/admin"
 ADMIN_ENV_FILE="$ADMIN_DIR/.env.local"
 ADMIN_COMPOSE_FILE="$ADMIN_DIR/compose.yml"
+ADMIN_RESTORE_HELPER="$ADMIN_DIR/restore_helper.py"
 XUI_INSTALL_RESULT="/etc/x-ui/install-result.env"
 XUI_INSTALL_URL="https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh"
 DEFAULT_REALITY_TARGET="www.amazon.com:443"
@@ -267,6 +268,8 @@ MIRAGE_ADMIN_BACKUP_DIR_HOST=$BACKUP_DIR
 MIRAGE_ADMIN_BACKUP_RETENTION_DAYS=${backup_retention_days:-14}
 MIRAGE_ADMIN_BACKUP_KEEP_MIN=${backup_keep_min:-3}
 MIRAGE_ADMIN_BACKUP_IMPORT_MAX_MB=${backup_import_max_mb:-64}
+MIRAGE_ADMIN_RESTORE_REQUEST_DIR_HOST=$RESTORE_REQUEST_DIR
+MIRAGE_ADMIN_RESTORE_STATUS_DIR_HOST=$RESTORE_STATUS_DIR
 MIRAGE_ALERTS_ENABLED=${alerts_enabled:-false}
 MIRAGE_ALERT_TELEGRAM_BOT_TOKEN=${alert_bot_token:-}
 MIRAGE_ALERT_TELEGRAM_CHAT_ID=${alert_chat_id:-}
@@ -401,6 +404,54 @@ EOF
   /usr/local/bin/mirage-xui-backup
 }
 
+install_restore_helper() {
+  log "Installing 3x-ui restore helper"
+  install -d -m 755 /usr/local/lib/mirage /etc/mirage
+  install -m 700 "$ADMIN_RESTORE_HELPER" /usr/local/lib/mirage/admin-restore-helper.py
+  install -d -m 700 "$RESTORE_STAGING_DIR"
+
+  cat > /etc/mirage/admin-restore.env <<EOF
+MIRAGE_ADMIN_BACKUP_DIR_HOST=$BACKUP_DIR
+MIRAGE_ADMIN_RESTORE_REQUEST_DIR_HOST=$RESTORE_REQUEST_DIR
+MIRAGE_ADMIN_RESTORE_STATUS_DIR_HOST=$RESTORE_STATUS_DIR
+MIRAGE_ADMIN_RESTORE_STAGING_DIR=$RESTORE_STAGING_DIR
+MIRAGE_ADMIN_RESTORE_LIVE_DB=/etc/x-ui/x-ui.db
+MIRAGE_ADMIN_UID=$ADMIN_RUNTIME_UID
+MIRAGE_ADMIN_GID=$ADMIN_RUNTIME_GID
+EOF
+  chmod 600 /etc/mirage/admin-restore.env
+
+  cat > /etc/systemd/system/mirage-admin-restore.service <<'EOF'
+[Unit]
+Description=Mirage Admin 3x-ui restore helper
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/mirage/admin-restore.env
+ExecStart=/usr/bin/python3 /usr/local/lib/mirage/admin-restore-helper.py
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+EOF
+
+  cat > /etc/systemd/system/mirage-admin-restore.path <<EOF
+[Unit]
+Description=Watch Mirage Admin restore requests
+
+[Path]
+PathChanged=$RESTORE_REQUEST_DIR
+PathExistsGlob=$RESTORE_REQUEST_DIR/restore-*.json
+Unit=mirage-admin-restore.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --now mirage-admin-restore.path
+  systemctl start mirage-admin-restore.service || true
+}
+
 render_access_file() {
   log "Writing access bundle"
   local access_file="$OUTPUT_DIR/access.md"
@@ -447,6 +498,9 @@ render_access_file() {
     printf '- Minimum kept backups: `%s`\n' "$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_BACKUP_KEEP_MIN || printf '3')"
     printf '- Timer: `mirage-xui-backup.timer`\n'
     printf '- Manual backup: `sudo /usr/local/bin/mirage-xui-backup`\n'
+    printf '- Restore requests: `%s`\n' "$RESTORE_REQUEST_DIR"
+    printf '- Restore status: `%s`\n' "$RESTORE_STATUS_DIR"
+    printf '- Restore helper: `mirage-admin-restore.path`\n'
     printf '\n## Telegram alerts\n\n'
     printf '- Enabled: `%s`\n' "$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ALERTS_ENABLED || printf 'false')"
     printf '- State directory: `%s`\n' "$OUTPUT_DIR/alerts"
@@ -486,10 +540,13 @@ main() {
   [[ -n "$RUNTIME_HOME" ]] || RUNTIME_HOME="/root"
   OUTPUT_DIR="${MIRAGE_VPN_OUTPUT_DIR:-$RUNTIME_HOME/mirage-vpn}"
   BACKUP_DIR="${MIRAGE_VPN_BACKUP_DIR:-$OUTPUT_DIR/backups}"
+  RESTORE_REQUEST_DIR="${MIRAGE_ADMIN_RESTORE_REQUEST_DIR_HOST:-$OUTPUT_DIR/restore-requests}"
+  RESTORE_STATUS_DIR="${MIRAGE_ADMIN_RESTORE_STATUS_DIR_HOST:-$OUTPUT_DIR/restore-status}"
+  RESTORE_STAGING_DIR="${MIRAGE_ADMIN_RESTORE_STAGING_DIR:-/var/lib/mirage/restore-staging}"
 
   mkdir -p "$OUTPUT_DIR" "$BACKUP_DIR"
-  mkdir -p "$OUTPUT_DIR/alerts"
-  chmod 700 "$OUTPUT_DIR" "$BACKUP_DIR" "$OUTPUT_DIR/alerts"
+  mkdir -p "$OUTPUT_DIR/alerts" "$RESTORE_REQUEST_DIR" "$RESTORE_STATUS_DIR"
+  chmod 700 "$OUTPUT_DIR" "$BACKUP_DIR" "$OUTPUT_DIR/alerts" "$RESTORE_REQUEST_DIR" "$RESTORE_STATUS_DIR"
   fix_output_owner
 
   log "Deploying Mirage VPN for host: $PUBLIC_HOST"
@@ -505,6 +562,7 @@ main() {
   build_xui_ops
   ensure_api_token
   write_admin_env
+  install_restore_helper
   start_admin_api
   bootstrap_vpn
   collect_client_links

@@ -14,6 +14,7 @@ from urllib.parse import quote as parse_quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import admin_api
+import restore_helper
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -128,6 +129,8 @@ class AdminApiTests(unittest.TestCase):
 
         self.assertIn("USER 10001:10001", dockerfile)
         self.assertIn('user: "${MIRAGE_ADMIN_UID:-10001}:${MIRAGE_ADMIN_GID:-10001}"', compose)
+        self.assertIn("MIRAGE_ADMIN_RESTORE_REQUEST_DIR", compose)
+        self.assertIn("MIRAGE_ADMIN_RESTORE_STATUS_DIR", compose)
 
     def test_deploy_writes_admin_uid_gid(self):
         deploy = (REPO_ROOT / "ops/vpn/deploy.sh").read_text(encoding="utf-8")
@@ -138,6 +141,8 @@ class AdminApiTests(unittest.TestCase):
         self.assertNotIn('ADMIN_RUNTIME_UID="${MIRAGE_ADMIN_UID:-$(env_file_value', deploy)
         self.assertIn('backup_owner_uid="\\${MIRAGE_ADMIN_UID:-$ADMIN_RUNTIME_UID}"', deploy)
         self.assertIn('chown -R "$ADMIN_RUNTIME_UID:$ADMIN_RUNTIME_GID" "$OUTPUT_DIR"', deploy)
+        self.assertIn("install_restore_helper", deploy)
+        self.assertIn("mirage-admin-restore.path", deploy)
 
     def test_validate_profile_name_rejects_path_like_values(self):
         with self.assertRaises(admin_api.AdminError):
@@ -190,6 +195,8 @@ class AdminApiTests(unittest.TestCase):
                 FakeApi(),
                 {"public_host": "vpn.example.net"},
                 backup_dir=Path(tmp),
+                restore_request_dir=Path(tmp) / "restore-requests",
+                restore_status_dir=Path(tmp) / "restore-status",
             )
 
             payload = service.overview()
@@ -290,6 +297,130 @@ class AdminApiTests(unittest.TestCase):
             with self.assertRaises(admin_api.AdminError) as ctx:
                 service.delete_backup("x-ui-20260101-000000.db", "x-ui-20260101-000000.db")
         self.assertEqual(ctx.exception.status, admin_api.HTTPStatus.NOT_FOUND)
+
+    def test_queue_restore_creates_safe_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            backup_dir = root / "backups"
+            request_dir = root / "restore-requests"
+            status_dir = root / "restore-status"
+            backup_dir.mkdir()
+            backup = backup_dir / "x-ui-20260101-000000.db"
+            backup.write_bytes(sqlite_backup_bytes())
+            service = admin_api.AdminService(
+                FakeApi(),
+                backup_dir=backup_dir,
+                restore_request_dir=request_dir,
+                restore_status_dir=status_dir,
+            )
+
+            payload = service.queue_restore(
+                backup.name,
+                {
+                    "confirm": "restore",
+                    "confirmName": backup.name,
+                    "ackDowntime": True,
+                    "token": "secret-token",
+                    "uuid": "secret-uuid",
+                },
+            )
+            request_files = list(request_dir.glob("restore-*.json"))
+            stored = json.loads(request_files[0].read_text(encoding="utf-8"))
+
+        serialized = json.dumps(stored)
+        self.assertEqual(payload["status"], "queued")
+        self.assertEqual(len(request_files), 1)
+        self.assertEqual(stored["backupName"], backup.name)
+        self.assertNotIn("secret-token", serialized)
+        self.assertNotIn("secret-uuid", serialized)
+        self.assertNotIn(str(backup_dir), serialized)
+
+    def test_queue_restore_requires_confirmation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            backup = Path(tmp) / "x-ui-20260101-000000.db"
+            backup.write_bytes(sqlite_backup_bytes())
+            service = admin_api.AdminService(FakeApi(), backup_dir=Path(tmp))
+
+            with self.assertRaises(admin_api.AdminError) as ctx:
+                service.queue_restore(backup.name, {"confirm": "restore", "confirmName": "wrong.db"})
+
+        self.assertEqual(ctx.exception.status, admin_api.HTTPStatus.BAD_REQUEST)
+
+    def test_queue_restore_rejects_path_like_backup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = admin_api.AdminService(FakeApi(), backup_dir=Path(tmp))
+            with self.assertRaises(admin_api.AdminError):
+                service.queue_restore("../x-ui-20260101-000000.db", {"confirm": "restore", "ackDowntime": True})
+
+    def test_restore_jobs_merges_request_and_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            request_dir = root / "restore-requests"
+            status_dir = root / "restore-status"
+            request_dir.mkdir()
+            status_dir.mkdir()
+            queued = {
+                "jobId": "restore-20260101-000000-abcdef123456",
+                "status": "queued",
+                "backupName": "x-ui-20260101-000000.db",
+                "createdAt": 1,
+                "updatedAt": 1,
+            }
+            done = {
+                "jobId": "restore-20260102-000000-abcdef123456",
+                "status": "success",
+                "backupName": "x-ui-20260102-000000.db",
+                "createdAt": 2,
+                "updatedAt": 3,
+            }
+            (request_dir / f"{queued['jobId']}.json").write_text(json.dumps(queued), encoding="utf-8")
+            (status_dir / f"{done['jobId']}.json").write_text(json.dumps(done), encoding="utf-8")
+            service = admin_api.AdminService(
+                FakeApi(),
+                backup_dir=root / "backups",
+                restore_request_dir=request_dir,
+                restore_status_dir=status_dir,
+            )
+
+            payload = service.restore_jobs()
+
+        self.assertEqual([job["jobId"] for job in payload["jobs"]], [done["jobId"], queued["jobId"]])
+
+    def test_restore_helper_rejects_path_escape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(restore_helper.RestoreError):
+                restore_helper.path_inside(
+                    Path(tmp).resolve(),
+                    "../x-ui-20260101-000000.db",
+                    restore_helper.BACKUP_RE,
+                )
+
+    def test_restore_helper_marks_malformed_job_failed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            request_dir = root / "requests"
+            status_dir = root / "status"
+            request_dir.mkdir()
+            job_id = "restore-20260101-000000-abcdef123456"
+            request_file = request_dir / f"{job_id}.json"
+            request_file.write_text("{bad json", encoding="utf-8")
+            with patch.dict(
+                os.environ,
+                {
+                    "MIRAGE_ADMIN_BACKUP_DIR_HOST": str(root / "backups"),
+                    "MIRAGE_ADMIN_RESTORE_REQUEST_DIR_HOST": str(request_dir),
+                    "MIRAGE_ADMIN_RESTORE_STATUS_DIR_HOST": str(status_dir),
+                    "MIRAGE_ADMIN_RESTORE_STAGING_DIR": str(root / "staging"),
+                    "MIRAGE_ADMIN_RESTORE_LIVE_DB": str(root / "x-ui.db"),
+                },
+                clear=True,
+            ):
+                restore_helper.main()
+            status = json.loads((status_dir / f"{job_id}.json").read_text(encoding="utf-8"))
+            request_exists = request_file.exists()
+
+        self.assertFalse(request_exists)
+        self.assertEqual(status["status"], "failed")
 
     def test_prune_backups_keeps_minimum_recent_files(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -469,6 +600,23 @@ class AdminApiTests(unittest.TestCase):
                 with request.urlopen(import_req, timeout=5) as response:
                     payload = json.loads(response.read().decode("utf-8"))
                 self.assertTrue((Path(tmp) / payload["name"]).is_file())
+
+                restore_body = json.dumps(
+                    {"confirm": "restore", "confirmName": payload["name"], "ackDowntime": True}
+                ).encode("utf-8")
+                restore_req = request.Request(
+                    f"{base_url}/api/v0/backups/{parse_quote(payload['name'])}/restore",
+                    data=restore_body,
+                    headers={
+                        "Authorization": "Bearer test-token",
+                        "Content-Type": "application/json",
+                    },
+                    method="POST",
+                )
+                with request.urlopen(restore_req, timeout=5) as response:
+                    self.assertEqual(response.status, 202)
+                    restore_payload = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(restore_payload["status"], "queued")
             finally:
                 server.shutdown()
                 server.server_close()
