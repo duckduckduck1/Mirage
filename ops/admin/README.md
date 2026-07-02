@@ -70,10 +70,15 @@ MIRAGE_ALERT_TELEGRAM_CHAT_ID=PASTE_CHAT_ID
 ```env
 MIRAGE_ADMIN_BACKUP_RETENTION_DAYS=14
 MIRAGE_ADMIN_BACKUP_KEEP_MIN=3
+MIRAGE_ADMIN_BACKUP_IMPORT_MAX_MB=64
 ```
 
 Prune удаляет только backup-файлы старше retention-периода и всегда сохраняет
 минимум `MIRAGE_ADMIN_BACKUP_KEEP_MIN` последних файлов.
+
+Import принимает внешний SQLite backup, проверяет формат и `PRAGMA integrity_check`,
+после чего сохраняет файл в backup-хранилище под новым безопасным именем.
+Импорт не подменяет live-базу 3x-ui автоматически.
 
 `POST /api/v0/backups/prune` без тела или с `dryRun: true` возвращает preview.
 Реальное удаление требует тело `{"dryRun": false, "confirm": "prune"}`.
@@ -97,6 +102,7 @@ Prune удаляет только backup-файлы старше retention-пе�
 | `POST` | `/api/v0/profiles/NAME/disable` | отключить профиль |
 | `GET` | `/api/v0/backups` | список backup-файлов |
 | `POST` | `/api/v0/backups` | создать backup базы 3x-ui |
+| `POST` | `/api/v0/backups/import` | импортировать внешний SQLite backup в backup-хранилище |
 | `POST` | `/api/v0/backups/prune` | preview или удаление старых backup по retention-политике |
 | `GET` | `/api/v0/backups/FILE` | скачать backup |
 | `DELETE` | `/api/v0/backups/FILE?confirmName=FILE` | удалить один backup |

@@ -1,5 +1,6 @@
 import json
 import os
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -17,9 +18,22 @@ import admin_api
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def sqlite_backup_bytes() -> bytes:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "x-ui.db"
+        connection = sqlite3.connect(path)
+        try:
+            connection.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
+            connection.execute("INSERT INTO settings VALUES ('version', 'test')")
+            connection.commit()
+        finally:
+            connection.close()
+        return path.read_bytes()
+
+
 class FakeApi:
     def __init__(self):
-        self.downloaded = b"sqlite-backup"
+        self.downloaded = sqlite_backup_bytes()
         self.calls = []
 
     def api(self, method, path, data=None, expect_success=True):
@@ -210,8 +224,31 @@ class AdminApiTests(unittest.TestCase):
             created = service.create_backup()
             listed = service.list_backups()
 
-            self.assertTrue(created["name"].startswith("x-ui-"))
-            self.assertEqual(listed["backups"][0]["name"], created["name"])
+        self.assertTrue(created["name"].startswith("x-ui-"))
+        self.assertEqual(listed["backups"][0]["name"], created["name"])
+
+    def test_import_backup_accepts_valid_sqlite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = admin_api.AdminService(FakeApi(), backup_dir=Path(tmp))
+
+            imported = service.import_backup(sqlite_backup_bytes())
+            stored = Path(tmp) / imported["name"]
+            stored_exists = stored.is_file()
+
+        self.assertTrue(imported["name"].startswith("x-ui-"))
+        self.assertTrue(imported["name"].endswith(".db"))
+        self.assertGreater(imported["size"], 0)
+        self.assertTrue(stored_exists)
+
+    def test_import_backup_rejects_invalid_sqlite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = admin_api.AdminService(FakeApi(), backup_dir=Path(tmp))
+            with self.assertRaises(admin_api.AdminError) as ctx:
+                service.import_backup(b"not a sqlite database")
+            files_after_import = list(Path(tmp).glob("*"))
+
+        self.assertEqual(ctx.exception.status, admin_api.HTTPStatus.BAD_REQUEST)
+        self.assertEqual(files_after_import, [])
 
     def test_delete_backup_removes_one_valid_backup(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -419,6 +456,19 @@ class AdminApiTests(unittest.TestCase):
                     payload = json.loads(response.read().decode("utf-8"))
                 self.assertEqual(payload["deleted"]["name"], backup.name)
                 self.assertFalse(backup.exists())
+
+                import_req = request.Request(
+                    f"{base_url}/api/v0/backups/import",
+                    data=sqlite_backup_bytes(),
+                    headers={
+                        "Authorization": "Bearer test-token",
+                        "Content-Type": "application/octet-stream",
+                    },
+                    method="POST",
+                )
+                with request.urlopen(import_req, timeout=5) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                self.assertTrue((Path(tmp) / payload["name"]).is_file())
             finally:
                 server.shutdown()
                 server.server_close()

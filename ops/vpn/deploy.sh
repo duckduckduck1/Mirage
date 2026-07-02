@@ -244,9 +244,10 @@ write_admin_env() {
   admin_uid="${MIRAGE_ADMIN_UID:-$ADMIN_RUNTIME_UID}"
   admin_gid="${MIRAGE_ADMIN_GID:-$ADMIN_RUNTIME_GID}"
 
-  local backup_retention_days backup_keep_min
+  local backup_retention_days backup_keep_min backup_import_max_mb
   backup_retention_days="${MIRAGE_ADMIN_BACKUP_RETENTION_DAYS:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_BACKUP_RETENTION_DAYS || true)}"
   backup_keep_min="${MIRAGE_ADMIN_BACKUP_KEEP_MIN:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_BACKUP_KEEP_MIN || true)}"
+  backup_import_max_mb="${MIRAGE_ADMIN_BACKUP_IMPORT_MAX_MB:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_BACKUP_IMPORT_MAX_MB || true)}"
 
   local alerts_enabled alert_bot_token alert_chat_id alert_interval alert_backup_max_age alert_disk_free_min
   alerts_enabled="${MIRAGE_ALERTS_ENABLED:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ALERTS_ENABLED || true)}"
@@ -265,6 +266,7 @@ MIRAGE_ADMIN_GID=${admin_gid}
 MIRAGE_ADMIN_BACKUP_DIR_HOST=$BACKUP_DIR
 MIRAGE_ADMIN_BACKUP_RETENTION_DAYS=${backup_retention_days:-14}
 MIRAGE_ADMIN_BACKUP_KEEP_MIN=${backup_keep_min:-3}
+MIRAGE_ADMIN_BACKUP_IMPORT_MAX_MB=${backup_import_max_mb:-64}
 MIRAGE_ALERTS_ENABLED=${alerts_enabled:-false}
 MIRAGE_ALERT_TELEGRAM_BOT_TOKEN=${alert_bot_token:-}
 MIRAGE_ALERT_TELEGRAM_CHAT_ID=${alert_chat_id:-}
