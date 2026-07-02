@@ -10,6 +10,7 @@ const state = {
   profiles: $("#profiles"),
   detail: $("#profile-detail"),
   backups: $("#backups"),
+  restoreJobs: $("#restore-jobs"),
   alertMetrics: $("#alert-metrics"),
   alerts: $("#alerts"),
   access: $("#access"),
@@ -226,8 +227,38 @@ function renderBackups(payload) {
       text: "Удалить",
       dataset: { backup: backup.name, backupAction: "delete" },
     });
-    const actions = el("div", { className: "actions" }, [button, removeButton]);
+    const restoreButton = el("button", {
+      className: "danger",
+      type: "button",
+      text: "Восстановить",
+      dataset: { backup: backup.name, backupAction: "restore" },
+    });
+    const actions = el("div", { className: "actions" }, [button, restoreButton, removeButton]);
     append(state.backups, el("div", { className: "backup-item" }, [info, actions]));
+  });
+}
+
+function renderRestoreJobs(payload) {
+  clear(state.restoreJobs);
+  const jobs = payload.jobs || [];
+  append(state.restoreJobs, el("h3", { text: "Восстановление" }));
+  if (!jobs.length) {
+    append(state.restoreJobs, el("p", { className: "muted", text: "Заявок нет" }));
+    return;
+  }
+  jobs.slice(0, 5).forEach((job) => {
+    const meta = [
+      job.backupName || "-",
+      job.updatedAt ? formatDate(job.updatedAt) : "нет времени",
+      job.error || "",
+    ].filter(Boolean);
+    append(
+      state.restoreJobs,
+      el("div", { className: `restore-job ${job.status || "queued"}` }, [
+        el("strong", { text: job.status || "queued" }),
+        el("span", { text: meta.join(" · ") }),
+      ]),
+    );
   });
 }
 
@@ -260,6 +291,7 @@ async function refreshAll() {
     ["Состояние", api("/health"), renderHealth],
     ["Профили", api("/profiles"), renderProfiles],
     ["Бэкапы", api("/backups"), renderBackups],
+    ["Восстановление", api("/restore-requests"), renderRestoreJobs],
     ["Alerts", api("/alerts"), renderAlerts],
   ];
   const results = await Promise.all(
@@ -357,6 +389,22 @@ async function deleteBackup(name) {
   toast("Бэкап удалён");
 }
 
+async function queueRestore(name) {
+  const typed = window.prompt(`Для восстановления введи имя backup:\n${name}`);
+  if (typed !== name) {
+    toast("Восстановление отменено");
+    return;
+  }
+  const confirmed = window.confirm("Восстановление перезапустит 3x-ui и временно прервёт VPN. Продолжить?");
+  if (!confirmed) return;
+  const job = await api(`/backups/${encodeURIComponent(name)}/restore`, {
+    method: "POST",
+    body: JSON.stringify({ confirm: "restore", confirmName: name, ackDowntime: true }),
+  });
+  await refreshAll();
+  toast(`Restore job создан: ${job.jobId}`);
+}
+
 async function pruneBackups() {
   const preview = await api("/backups/prune", { method: "POST", body: JSON.stringify({ dryRun: true }) });
   if (!preview.pruned.length) {
@@ -444,6 +492,10 @@ function bindEvents() {
     if (!button) return;
     if (button.dataset.backupAction === "delete") {
       deleteBackup(button.dataset.backup).catch((error) => toast(error.message));
+      return;
+    }
+    if (button.dataset.backupAction === "restore") {
+      queueRestore(button.dataset.backup).catch((error) => toast(error.message));
       return;
     }
     downloadBackup(button.dataset.backup).catch((error) => toast(error.message));

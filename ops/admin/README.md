@@ -71,6 +71,8 @@ MIRAGE_ALERT_TELEGRAM_CHAT_ID=PASTE_CHAT_ID
 MIRAGE_ADMIN_BACKUP_RETENTION_DAYS=14
 MIRAGE_ADMIN_BACKUP_KEEP_MIN=3
 MIRAGE_ADMIN_BACKUP_IMPORT_MAX_MB=64
+MIRAGE_ADMIN_RESTORE_REQUEST_DIR_HOST=/home/mirage/mirage-vpn/restore-requests
+MIRAGE_ADMIN_RESTORE_STATUS_DIR_HOST=/home/mirage/mirage-vpn/restore-status
 ```
 
 Prune удаляет только backup-файлы старше retention-периода и всегда сохраняет
@@ -79,6 +81,12 @@ Prune удаляет только backup-файлы старше retention-пе�
 Import принимает внешний SQLite backup, проверяет формат и `PRAGMA integrity_check`,
 после чего сохраняет файл в backup-хранилище под новым безопасным именем.
 Импорт не подменяет live-базу 3x-ui автоматически.
+
+Restore создаёт заявку в `MIRAGE_ADMIN_RESTORE_REQUEST_DIR_HOST`. Root-helper
+`mirage-admin-restore.path` забирает заявку, повторно проверяет backup, делает
+pre-restore backup текущей базы, останавливает `x-ui`, заменяет `/etc/x-ui/x-ui.db`,
+запускает `x-ui` и пишет статус в `MIRAGE_ADMIN_RESTORE_STATUS_DIR_HOST`.
+Операция временно прерывает VPN-сервис и требует явного подтверждения имени backup.
 
 `POST /api/v0/backups/prune` без тела или с `dryRun: true` возвращает preview.
 Реальное удаление требует тело `{"dryRun": false, "confirm": "prune"}`.
@@ -103,8 +111,11 @@ Import принимает внешний SQLite backup, проверяет фо�
 | `GET` | `/api/v0/backups` | список backup-файлов |
 | `POST` | `/api/v0/backups` | создать backup базы 3x-ui |
 | `POST` | `/api/v0/backups/import` | импортировать внешний SQLite backup в backup-хранилище |
+| `POST` | `/api/v0/backups/FILE/restore` | создать заявку на восстановление backup через root-helper |
 | `POST` | `/api/v0/backups/prune` | preview или удаление старых backup по retention-политике |
 | `GET` | `/api/v0/backups/FILE` | скачать backup |
 | `DELETE` | `/api/v0/backups/FILE?confirmName=FILE` | удалить один backup |
+| `GET` | `/api/v0/restore-requests` | список restore-заявок и статусов |
+| `GET` | `/api/v0/restore-requests/JOB_ID` | статус одной restore-заявки |
 
 Restore добавляется отдельным этапом.

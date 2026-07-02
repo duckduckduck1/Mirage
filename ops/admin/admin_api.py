@@ -12,6 +12,7 @@ import ipaddress
 import json
 import os
 import re
+import secrets
 import shutil
 import socket
 import sqlite3
@@ -33,9 +34,12 @@ import xui_api  # noqa: E402
 
 PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$")
 BACKUP_RE = re.compile(r"^x-ui-\d{8}-\d{6}(?:-\d{3})?\.db$")
+RESTORE_JOB_RE = re.compile(r"^restore-\d{8}-\d{6}-[a-f0-9]{12}$")
 DEFAULT_ADMIN_HOST = "127.0.0.1"
 DEFAULT_ADMIN_PORT = 8090
 DEFAULT_BACKUP_DIR = Path("/data/backups")
+DEFAULT_RESTORE_REQUEST_DIR = Path("/data/restore-requests")
+DEFAULT_RESTORE_STATUS_DIR = Path("/data/restore-status")
 DEFAULT_BACKUP_RETENTION_DAYS = 14
 DEFAULT_BACKUP_KEEP_MIN = 3
 DEFAULT_BACKUP_IMPORT_MAX_MB = 64
@@ -218,18 +222,49 @@ def validate_sqlite_backup(path: Path) -> None:
         raise AdminError(HTTPStatus.BAD_REQUEST, "backup SQLite integrity check failed")
 
 
+def new_restore_job_id() -> str:
+    return f"restore-{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(6)}"
+
+
+def restore_status_info(path: Path) -> dict[str, Any] | None:
+    if not RESTORE_JOB_RE.fullmatch(path.stem):
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    payload["jobId"] = path.stem
+    return payload
+
+
+def json_path_inside(root: Path, name: str) -> Path:
+    if not RESTORE_JOB_RE.fullmatch(name):
+        raise AdminError(HTTPStatus.BAD_REQUEST, "invalid restore job id")
+    path = (root / f"{name}.json").resolve()
+    resolved_root = root.resolve()
+    if resolved_root not in path.parents:
+        raise AdminError(HTTPStatus.BAD_REQUEST, "invalid restore job path")
+    return path
+
+
 class AdminService:
     def __init__(
         self,
         api: xui_api.XuiClient,
         config: dict[str, Any] | None = None,
         backup_dir: Path = DEFAULT_BACKUP_DIR,
+        restore_request_dir: Path = DEFAULT_RESTORE_REQUEST_DIR,
+        restore_status_dir: Path = DEFAULT_RESTORE_STATUS_DIR,
         notifier_factory: Callable[[str, str], "TelegramNotifier"] | None = None,
     ) -> None:
         self.api = api
         self.config = config or {}
         self.args = env_namespace()
         self.backup_dir = backup_dir
+        self.restore_request_dir = restore_request_dir
+        self.restore_status_dir = restore_status_dir
         self.notifier_factory = notifier_factory or TelegramNotifier
 
     def public_host(self) -> str | None:
@@ -429,6 +464,63 @@ class AdminService:
         deleted = backup_info(path)
         path.unlink()
         return {"deleted": deleted}
+
+    def queue_restore(self, name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if payload.get("confirmName") != name:
+            raise AdminError(HTTPStatus.BAD_REQUEST, "confirmName must match backup name")
+        if payload.get("confirm") != "restore":
+            raise AdminError(HTTPStatus.BAD_REQUEST, "confirm must be restore for backup restore")
+        if payload.get("ackDowntime") is not True:
+            raise AdminError(HTTPStatus.BAD_REQUEST, "ackDowntime must be true")
+
+        path = self.backup_path(name)
+        info = backup_info(path)
+        self.restore_request_dir.mkdir(parents=True, exist_ok=True)
+        self.restore_request_dir.chmod(0o700)
+        job_id = new_restore_job_id()
+        now = int(time.time())
+        job = {
+            "jobId": job_id,
+            "status": "queued",
+            "backupName": info["name"],
+            "backupSize": info["size"],
+            "backupMtime": info["mtime"],
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        path_obj = json_path_inside(self.restore_request_dir, job_id)
+        temp_path = path_obj.with_name(f".{path_obj.name}.tmp")
+        try:
+            temp_path.write_text(json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8")
+            temp_path.chmod(0o600)
+            temp_path.replace(path_obj)
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
+        return job
+
+    def restore_jobs(self) -> dict[str, Any]:
+        jobs: dict[str, dict[str, Any]] = {}
+        for root in [self.restore_request_dir, self.restore_status_dir]:
+            try:
+                paths = list(root.glob("restore-*.json"))
+            except OSError:
+                continue
+            for path in paths:
+                payload = restore_status_info(path)
+                if payload:
+                    jobs[payload["jobId"]] = payload
+        ordered = sorted(jobs.values(), key=lambda item: int(item.get("updatedAt") or 0), reverse=True)
+        return {"jobs": ordered}
+
+    def restore_job(self, job_id: str) -> dict[str, Any]:
+        json_path_inside(self.restore_status_dir, job_id)
+        for root in [self.restore_status_dir, self.restore_request_dir]:
+            path = json_path_inside(root, job_id)
+            payload = restore_status_info(path)
+            if payload:
+                return payload
+        raise AdminError(HTTPStatus.NOT_FOUND, "restore job was not found")
 
     def prune_backups(self, payload: dict[str, Any]) -> dict[str, Any]:
         policy = backup_policy()
@@ -804,6 +896,9 @@ def make_handler(service: AdminService, token: str) -> type[BaseHTTPRequestHandl
             if method == "POST" and route == ["backups", "prune"]:
                 self._send_json(HTTPStatus.OK, service.prune_backups(read_json_body(self)))
                 return
+            if method == "POST" and len(route) == 3 and route[:1] == ["backups"] and route[2] == "restore":
+                self._send_json(HTTPStatus.ACCEPTED, service.queue_restore(route[1], read_json_body(self)))
+                return
             if method == "GET" and len(route) == 2 and route[:1] == ["backups"]:
                 path_obj = service.backup_path(route[1])
                 data = path_obj.read_bytes()
@@ -819,6 +914,12 @@ def make_handler(service: AdminService, token: str) -> type[BaseHTTPRequestHandl
                 query = parse.parse_qs(parsed.query)
                 confirm_name = (query.get("confirmName") or [""])[0]
                 self._send_json(HTTPStatus.OK, service.delete_backup(route[1], confirm_name))
+                return
+            if method == "GET" and route == ["restore-requests"]:
+                self._send_json(HTTPStatus.OK, service.restore_jobs())
+                return
+            if method == "GET" and len(route) == 2 and route[:1] == ["restore-requests"]:
+                self._send_json(HTTPStatus.OK, service.restore_job(route[1]))
                 return
 
             raise AdminError(HTTPStatus.NOT_FOUND, "not found")
@@ -855,11 +956,19 @@ def build_service() -> AdminService:
     args = env_namespace()
     api = xui_api.api_from_args(args, {})
     backup_dir = Path(os.environ.get("MIRAGE_ADMIN_BACKUP_DIR", str(DEFAULT_BACKUP_DIR)))
+    restore_request_dir = Path(os.environ.get("MIRAGE_ADMIN_RESTORE_REQUEST_DIR", str(DEFAULT_RESTORE_REQUEST_DIR)))
+    restore_status_dir = Path(os.environ.get("MIRAGE_ADMIN_RESTORE_STATUS_DIR", str(DEFAULT_RESTORE_STATUS_DIR)))
     config: dict[str, Any] = {}
     public_host = xui_api.public_host_value(args, config)
     if public_host:
         config["public_host"] = public_host
-    return AdminService(api=api, config=config, backup_dir=backup_dir)
+    return AdminService(
+        api=api,
+        config=config,
+        backup_dir=backup_dir,
+        restore_request_dir=restore_request_dir,
+        restore_status_dir=restore_status_dir,
+    )
 
 
 def serve() -> None:

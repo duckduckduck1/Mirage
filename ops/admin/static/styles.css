@@ -116,6 +116,13 @@ h2 {
   line-height: 1.3;
 }
 
+h3 {
+  margin: 12px 0 8px;
+  font-size: 14px;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
 #summary {
   margin-top: 4px;
   color: var(--muted);
@@ -196,7 +203,8 @@ h2 {
 
 .metrics div,
 .check,
-.backup-item {
+.backup-item,
+.restore-job {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #171b24;
@@ -214,7 +222,8 @@ h2 {
 }
 
 .checks,
-.backup-list {
+.backup-list,
+.restore-list {
   display: grid;
   gap: 8px;
 }
@@ -302,6 +311,24 @@ th {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
+}
+
+.restore-job {
+  display: grid;
+  gap: 4px;
+}
+
+.restore-job.success strong {
+  color: var(--green);
+}
+
+.restore-job.failed strong {
+  color: var(--red);
+}
+
+.restore-job.running strong,
+.restore-job.queued strong {
+  color: var(--yellow);
 }
 
 .muted {
