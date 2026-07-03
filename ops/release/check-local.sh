@@ -164,23 +164,38 @@ if findings:
 PY
 }
 
-COMPOSE_ENV_CREATED=""
+copy_compose_dir() {
+  local src="$1"
+  local dest="$2"
+  local file
+  mkdir -p "$dest"
+  while IFS= read -r file; do
+    mkdir -p "$dest/$(dirname "$file")"
+    cp "$src/$file" "$dest/$file"
+  done < <(
+    cd "$src"
+    find . \
+      \( -type d \( -name __pycache__ -o -name output \) -prune \) -o \
+      \( -type f ! -name ".env.local" ! -name "*.local.json" -print \)
+  )
+}
 
-ensure_env_file() {
-  local example="$1"
-  local target="$2"
-  if [ -f "$target" ]; then
-    return
-  fi
-  cp "$example" "$target"
-  COMPOSE_ENV_CREATED="$COMPOSE_ENV_CREATED $target"
+prepare_compose_workspace() {
+  COMPOSE_CONFIG_TMP="$(mktemp -d)"
+  mkdir -p "$COMPOSE_CONFIG_TMP/ops"
+  cp .dockerignore "$COMPOSE_CONFIG_TMP/.dockerignore"
+  copy_compose_dir ops/xui "$COMPOSE_CONFIG_TMP/ops/xui"
+  copy_compose_dir ops/admin "$COMPOSE_CONFIG_TMP/ops/admin"
+  cp ops/xui/.env.example "$COMPOSE_CONFIG_TMP/ops/xui/.env.local"
+  cp ops/admin/.env.example "$COMPOSE_CONFIG_TMP/ops/admin/.env.local"
+  mkdir -p \
+    "$COMPOSE_CONFIG_TMP/backups" \
+    "$COMPOSE_CONFIG_TMP/.local/restore-requests" \
+    "$COMPOSE_CONFIG_TMP/.local/restore-status" \
+    "$COMPOSE_CONFIG_TMP/.local/admin-alerts"
 }
 
 cleanup() {
-  local path
-  for path in $COMPOSE_ENV_CREATED; do
-    rm -f "$path"
-  done
   if [ -n "${COMPOSE_CONFIG_TMP:-}" ]; then
     rm -rf "$COMPOSE_CONFIG_TMP"
   fi
@@ -224,15 +239,18 @@ if [ "$SKIP_DOCKER" = true ]; then
 fi
 
 log "Docker Compose config"
-ensure_env_file ops/xui/.env.example ops/xui/.env.local
-ensure_env_file ops/admin/.env.example ops/admin/.env.local
-mkdir -p backups .local/restore-requests .local/restore-status .local/admin-alerts
-COMPOSE_CONFIG_TMP="$(mktemp -d)"
-docker compose -f ops/xui/compose.yml config > "$COMPOSE_CONFIG_TMP/xui-compose.yml"
-docker compose --env-file ops/admin/.env.local -f ops/admin/compose.yml config > "$COMPOSE_CONFIG_TMP/admin-compose.yml"
+prepare_compose_workspace
+(
+  cd "$COMPOSE_CONFIG_TMP"
+  docker compose -f ops/xui/compose.yml config > xui-compose.yml
+  docker compose --env-file ops/admin/.env.local -f ops/admin/compose.yml config > admin-compose.yml
+)
 
 log "Docker image builds"
-docker compose -f ops/xui/compose.yml build
-docker compose --env-file ops/admin/.env.local -f ops/admin/compose.yml build
+(
+  cd "$COMPOSE_CONFIG_TMP"
+  docker compose -f ops/xui/compose.yml build
+  docker compose --env-file ops/admin/.env.local -f ops/admin/compose.yml build
+)
 
 log "Release gate passed"
