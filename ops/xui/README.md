@@ -1,11 +1,9 @@
 # xui-ops
 
-`xui-ops` — CLI для управления 3x-ui через HTTP API. В v0.1 основной пользователь
-работает через Mirage Admin, а `xui-ops` остаётся техническим инструментом для
-deploy, диагностики и ручных операций.
+`xui-ops` — CLI для управления 3x-ui через API. Deploy использует его для
+создания inbound, профилей, ссылок и диагностики.
 
-Основной путь установки: [развёртывание на VPS](../../docs/deploy.md).
-Ежедневная работа: [эксплуатация](../../docs/operations.md).
+Основной порядок установки и работы описан в [руководстве](../../docs/guide.md).
 
 ## Запуск
 
@@ -15,26 +13,13 @@ deploy, диагностики и ручных операций.
 sudo docker compose -f ops/xui/compose.yml run --rm xui-ops COMMAND
 ```
 
-Контейнер использует host network, чтобы видеть 3x-ui на
+Контейнер использует host network, чтобы обращаться к 3x-ui на
 `127.0.0.1:ПОРТ_ПАНЕЛИ`.
 
-Локально для разработки:
+## Env-файл
 
-```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r ops\xui\requirements.txt
-.\.venv\Scripts\python.exe ops\xui\xui_api.py --help
-```
-
-## Конфигурация
-
-Локальный env-файл на VPS:
-
-```bash
-cp ops/xui/.env.example ops/xui/.env.local
-```
-
-Минимальные переменные:
+`ops/vpn/deploy.sh` создаёт `ops/xui/.env.local` автоматически. Основные
+переменные:
 
 ```text
 MIRAGE_XUI_BASE_URL=http://127.0.0.1:ПОРТ_ПАНЕЛИ/WEB_BASE_PATH
@@ -45,17 +30,23 @@ MIRAGE_XUI_REALITY_TARGET=www.amazon.com:443
 MIRAGE_XUI_REALITY_SNI=www.amazon.com
 ```
 
-`ops/vpn/deploy.sh` заполняет этот файл автоматически.
+## Команды
 
-## Частые команды
+| Задача | Команда |
+|---|---|
+| Показать inbound'ы | `sudo docker compose -f ops/xui/compose.yml run --rm xui-ops inbounds` |
+| Показать доступы без client links | `sudo docker compose -f ops/xui/compose.yml run --rm xui-ops access-info` |
+| Проверить VPN | `sudo docker compose -f ops/xui/compose.yml run --rm xui-ops vpn-diagnose` |
+| Получить профиль | `sudo docker compose -f ops/xui/compose.yml run --rm xui-ops subscriptions --email main` |
+| Получить поля для V2RayTun | `sudo docker compose -f ops/xui/compose.yml run --rm xui-ops subscriptions --email main --target v2raytun` |
+| Сделать backup через API 3x-ui | `sudo docker compose -f ops/xui/compose.yml run --rm xui-ops backup-db` |
+
+Создать профиль:
 
 ```bash
-sudo docker compose -f ops/xui/compose.yml run --rm xui-ops inbounds
-sudo docker compose -f ops/xui/compose.yml run --rm xui-ops access-info
-sudo docker compose -f ops/xui/compose.yml run --rm xui-ops vpn-diagnose
-sudo docker compose -f ops/xui/compose.yml run --rm xui-ops subscriptions --email main
-sudo docker compose -f ops/xui/compose.yml run --rm xui-ops subscriptions --email main --target v2raytun
-sudo docker compose -f ops/xui/compose.yml run --rm xui-ops backup-db
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops ensure-client \
+  --email CLIENT_NAME \
+  --print-links
 ```
 
 Пересоздать VLESS Reality inbound:
@@ -68,15 +59,7 @@ sudo docker compose -f ops/xui/compose.yml run --rm xui-ops bootstrap-vpn \
   --print-links
 ```
 
-Создать клиента:
-
-```bash
-sudo docker compose -f ops/xui/compose.yml run --rm xui-ops ensure-client \
-  --email CLIENT_NAME \
-  --print-links
-```
-
-## Быстрый вход в 3x-ui
+## Открыть 3x-ui
 
 С Windows:
 
@@ -84,10 +67,15 @@ sudo docker compose -f ops/xui/compose.yml run --rm xui-ops ensure-client \
 .\ops\xui\open-panel.ps1 -ServerHost SERVER_HOST_OR_DOMAIN
 ```
 
-Скрипт открывает именно кабинет 3x-ui. Mirage Admin открывай отдельным
-SSH-туннелем на `8090`, как описано в [эксплуатации](../../docs/operations.md).
+Скрипт открывает кабинет 3x-ui. Mirage Admin открывается отдельным туннелем на
+`8090`.
 
-## Безопасность
+## Локальная разработка
 
-`vpn-diagnose` не печатает клиентские ссылки, UUID, short IDs и ключи. Команды,
-которые выводят ссылки, считай секретными.
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r ops\xui\requirements.txt
+.\.venv\Scripts\python.exe ops\xui\xui_api.py --help
+```
+
+Команды, которые выводят клиентские ссылки, считай секретными.
