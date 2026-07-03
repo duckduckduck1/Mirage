@@ -178,6 +178,19 @@ class AdminApiTests(unittest.TestCase):
         strong = "0123456789abcdef0123456789abcdef"
         self.assertEqual(admin_api.validate_admin_token(f" {strong} "), strong)
 
+    def test_load_runtime_env_skips_unreadable_default_files(self):
+        with patch.dict(os.environ, {"MIRAGE_XUI_ENV_FILE": "", "MIRAGE_ADMIN_ENV_FILE": ""}, clear=False):
+            with patch.object(admin_api.xui_api, "load_env_file", side_effect=PermissionError("denied")) as load_env:
+                admin_api.load_runtime_env()
+
+        self.assertEqual(load_env.call_count, 2)
+
+    def test_load_runtime_env_requires_explicit_env_files(self):
+        with patch.dict(os.environ, {"MIRAGE_XUI_ENV_FILE": "/root/xui.env"}, clear=False):
+            with patch.object(admin_api.xui_api, "load_env_file", side_effect=PermissionError("denied")):
+                with self.assertRaises(PermissionError):
+                    admin_api.load_runtime_env()
+
     def test_read_json_body_rejects_bad_length_and_large_body(self):
         with self.assertRaises(admin_api.AdminError) as bad_length:
             admin_api.read_json_body(FakeBodyHandler("not-a-number", b"{}"))
