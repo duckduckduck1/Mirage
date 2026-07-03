@@ -13,7 +13,7 @@
 ```bash
 apt update
 apt install -y ansible git
-git clone --branch dev https://github.com/duckduckduck1/Mirage.git /root/mirage
+git clone --branch main https://github.com/duckduckduck1/Mirage.git /root/mirage
 cd /root/mirage/infra/ansible
 ansible-playbook --syntax-check site.yml
 ansible-playbook site.yml
