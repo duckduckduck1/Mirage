@@ -1,37 +1,25 @@
 # Миграция на новый VPS
 
-Runbook описывает переезд Mirage на новый сервер при блокировке IP, замене VPS
-или плановом переносе инфраструктуры.
+Runbook описывает перенос Mirage на новый VPS при блокировке IP, замене сервера
+или плановой миграции.
 
-Цель миграции — сохранить клиентские subscription-ссылки и минимизировать ручные
-действия на стороне клиентов.
+Не добавляй в git backup-файлы, приватные ключи, пароли, API token, DSN базы и
+клиентские ссылки.
 
 ## Что подготовить
 
 - Новый VPS с root-доступом.
-- Актуальный публичный SSH-ключ `mirage_ed25519.pub`.
-- Свежий бэкап 3x-ui: база, inbound'ы, клиенты, Reality-параметры.
-- Доступ к DNS-зоне домена.
-- Доступ к локальному репозиторию Mirage.
+- Публичный SSH-ключ `mirage_ed25519.pub`.
+- Свежий backup базы 3x-ui.
+- Доступ к репозиторию Mirage.
+- Домен, если он уже используется для профилей или подписок.
 
-Не копируй в git backup-файлы, приватные ключи, пароли, API-токены, DSN базы и
-готовые клиентские ссылки.
+Если домена нет, после миграции нужно выдать клиентам свежие ссылки с новым
+`SERVER_HOST_OR_DOMAIN`.
 
-## Перед переключением DNS
+## 1. Подними базовый доступ
 
-Снизь TTL записей заранее, если DNS-провайдер это позволяет:
-
-```text
-sub.ДОМЕН   TTL 60–300
-vpn.ДОМЕН   TTL 60–300
-```
-
-Записи для Reality и подписок держи в режиме **DNS only**. Cloudflare proxy не
-подходит как универсальная прослойка для произвольного TCP-трафика Reality.
-
-## Подготовка нового VPS
-
-На новом сервере выполни bootstrap:
+На новом VPS:
 
 ```bash
 ssh root@NEW_SERVER_IP
@@ -43,121 +31,86 @@ ansible-playbook --syntax-check site.yml
 ansible-playbook site.yml
 ```
 
-Проверь вход по ключу:
+Проверь вход:
 
 ```bash
 ssh -i ~/.ssh/mirage_ed25519 mirage@NEW_SERVER_IP
 ```
 
-Включи SSH-hardening только после проверки нового входа:
+После проверки включи hardening:
 
 ```bash
 cd /root/mirage/infra/ansible
 ansible-playbook site.yml -e enable_ssh_hardening=true --tags hardening
 ```
 
-## Установка сервисов
+## 2. Разверни Mirage
 
-Установи 3x-ui/Xray, Docker и `xui-ops` по основному гайду:
-
-- [Установка VPN на VPS](../setup/README.md)
-
-После установки проверь API-доступ:
+Под пользователем `mirage`:
 
 ```bash
+mkdir -p /home/mirage/projects
+git clone --branch dev https://github.com/duckduckduck1/Mirage.git /home/mirage/projects/Mirage
 cd /home/mirage/projects/Mirage
-sudo docker compose -f ops/xui/compose.yml run --rm xui-ops inbounds
-sudo docker compose -f ops/xui/compose.yml run --rm xui-ops vpn-diagnose
+sudo bash ops/vpn/deploy.sh NEW_SERVER_HOST_OR_DOMAIN
 ```
-
-Если Ansible-роль для 3x-ui будет добавлена позже, замени этот шаг запуском
-соответствующего playbook.
-
-## Восстановление 3x-ui
-
-Восстанови бэкап панели через **Бэкап и восстановление** в 3x-ui или штатную
-команду для выбранной базы.
 
 Проверь:
 
 ```bash
-cd /home/mirage/projects/Mirage
+sudo -E bash ops/release/check-local.sh
 sudo docker compose -f ops/xui/compose.yml run --rm xui-ops vpn-diagnose
-sudo ss -tlnp | grep -E ':443|:8388|:ПОРТ_ПАНЕЛИ'
-sudo ufw status
+sudo ss -tlnp | grep -E ':443|127.0.0.1:8090'
+sudo ufw status numbered
+```
+
+## 3. Восстанови backup
+
+Открой Mirage Admin через SSH-туннель:
+
+```powershell
+ssh -i $HOME\.ssh\mirage_ed25519 -N -L 8090:127.0.0.1:8090 mirage@NEW_SERVER_HOST_OR_DOMAIN
+```
+
+В Mirage Admin:
+
+1. Импортируй backup.
+2. Запусти restore.
+3. Дождись успешного статуса.
+4. Проверь, что `x-ui` снова active.
+
+На VPS:
+
+```bash
 systemctl status x-ui --no-pager
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops vpn-diagnose
 ```
 
-Ожидаемые признаки:
+## 4. Проверь новый сервер
 
-```text
-*:443                    xray-linux-amd64
-127.0.0.1:ПОРТ_ПАНЕЛИ     x-ui
-443/tcp ALLOW
-x-ui active (running)
-warnings: none
-```
-
-Если резервный протокол не входит в текущую production-схему, `8388/tcp` не
-должен слушать и не должен быть открыт в `ufw`.
-
-## Проверка до переключения клиентов
-
-На локальной машине проверь доступность нового сервера:
+С локальной машины:
 
 ```powershell
-Test-NetConnection NEW_SERVER_IP -Port 443
+Test-NetConnection NEW_SERVER_HOST_OR_DOMAIN -Port 443
 ```
 
-Временно импортируй тестовый профиль с `NEW_SERVER_IP` и проверь:
+Импортируй тестовый профиль и проверь подключение. В Mirage Admin или 3x-ui
+должен расти трафик у выбранного профиля.
 
-- VLESS Reality подключается;
-- в панели растёт трафик у правильного inbound;
-- панель 3x-ui не открывается напрямую снаружи.
+## 5. Переключи клиентов
 
-Резервный протокол проверяй отдельно, только если он уже выбран и входит в
-актуальную production-схему.
+Если используется домен, переключи DNS A-запись на новый IP. Держи записи в
+режиме DNS only, если протокол идёт напрямую на VPS.
 
-## Переключение DNS
+Если домена нет:
 
-Когда новый VPS проверен, переключи A-записи:
+1. Получи свежие профили из Mirage Admin.
+2. Передай новые ссылки участникам.
+3. Попроси удалить старые профили из клиентских приложений.
 
-```text
-sub.ДОМЕН   A   NEW_SERVER_IP
-vpn.ДОМЕН   A   NEW_SERVER_IP
-```
+## 6. Заверши миграцию
 
-Проверь резолвинг:
-
-```bash
-dig +short sub.ДОМЕН
-dig +short vpn.ДОМЕН
-```
-
-На Windows можно проверить так:
-
-```powershell
-Resolve-DnsName sub.ДОМЕН
-Resolve-DnsName vpn.ДОМЕН
-```
-
-## Проверка после переключения
-
-Обнови subscription в клиентском приложении и проверь подключение.
-
-На VPS смотри логи:
-
-```bash
-sudo journalctl -u x-ui -f
-```
-
-Если клиенты продолжают идти на старый IP, дождись истечения TTL и проверь DNS у
-клиента. Если профиль содержит IP вместо домена, экспортируй профиль заново и
-переходи на subscription-ссылку.
-
-## После миграции
-
-- Сохрани новый backup 3x-ui.
-- Проверь, что старый VPS больше не обслуживает клиентов.
-- Останови или удали старый VPS только после успешной проверки клиентов.
-- Обнови внутренние заметки с датой миграции, провайдером и новым backup-файлом.
+- Сделай новый backup на новом VPS.
+- Проверь `443/tcp`, Mirage Admin и client traffic.
+- Оставь старый VPS включённым до подтверждения клиентов.
+- Удали старый VPS только после успешной проверки.
