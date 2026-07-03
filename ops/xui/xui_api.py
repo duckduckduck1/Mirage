@@ -771,9 +771,9 @@ def build_subscription_bundle(api: XuiClient, email: str, public_host: str | Non
     subscription_warning = ""
     try:
         sub_id, subscription_links = get_subscription_links(api, email, public_host)
-    except ApiError as exc:
+    except ApiError:
         sub_id, subscription_links = None, []
-        subscription_warning = f"Subscription-derived links are not available from 3x-ui: {exc}"
+        subscription_warning = "Subscription-derived links are not available from 3x-ui."
     primary = next((item for item in direct_links if item.startswith("vless://")), direct_links[0] if direct_links else "")
     parsed = parse_vless_reality_link(primary) if primary else {
         "link": "",

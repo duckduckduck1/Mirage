@@ -1,6 +1,7 @@
 import argparse
 import contextlib
 import io
+import json
 import sys
 import tempfile
 import unittest
@@ -457,14 +458,24 @@ class XuiApiTests(unittest.TestCase):
                 if path == "/panel/api/clients/get/main":
                     return {"success": True, "obj": {"client": {"subId": "sub123"}}}
                 if path == "/panel/api/clients/subLinks/sub123":
-                    raise xui_api.ApiError("temporary unavailable")
+                    raise xui_api.ApiError(
+                        "GET http://127.0.0.1:31453/secret-web-path failed "
+                        "token=secret-value password=panel-password"
+                    )
                 raise AssertionError(path)
 
         bundle = xui_api.build_subscription_bundle(FakeApi(), "main", "vpn.example.net")
 
         self.assertEqual(bundle["hiddify"]["directLinks"][0].split("@", 1)[1].split(":", 1)[0], "vpn.example.net")
         self.assertEqual(bundle["hiddify"]["subscriptionDerivedLinks"], [])
-        self.assertIn("temporary unavailable", bundle["diagnostics"]["warnings"][0])
+        self.assertEqual(
+            bundle["diagnostics"]["warnings"][0],
+            "Subscription-derived links are not available from 3x-ui.",
+        )
+        self.assertNotIn("127.0.0.1:31453", json.dumps(bundle))
+        self.assertNotIn("secret-web-path", json.dumps(bundle))
+        self.assertNotIn("secret-value", json.dumps(bundle))
+        self.assertNotIn("panel-password", json.dumps(bundle))
 
     def test_print_subscription_bundle_contains_app_sections(self):
         bundle = {

@@ -65,6 +65,11 @@ WEAK_ADMIN_TOKENS = {
     "token",
 }
 MIN_ADMIN_TOKEN_LENGTH = 32
+ERROR_URL_RE = re.compile(r"https?://[^\s'\"<>]+")
+ERROR_BEARER_RE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
+ERROR_SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b(api[_-]?token|token|password|secret|webbasepath|web_base_path)\s*[:=]\s*[^,\s;]+"
+)
 
 
 class AdminError(RuntimeError):
@@ -99,6 +104,21 @@ def env_flag(name: str, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def safe_error_message(exc: BaseException, fallback: str = "operation failed") -> str:
+    if isinstance(exc, xui_api.ApiError):
+        return "upstream 3x-ui API request failed"
+    if isinstance(exc, (OSError, TimeoutError)):
+        return fallback
+    return fallback
+
+
+def redact_error_text(value: Any) -> str:
+    text = str(value or "")
+    text = ERROR_URL_RE.sub("<redacted-url>", text)
+    text = ERROR_BEARER_RE.sub("Bearer <redacted>", text)
+    return ERROR_SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=<redacted>", text)
 
 
 def validate_admin_token(token: str) -> str:
@@ -222,13 +242,13 @@ def validate_sqlite_backup(path: Path) -> None:
     try:
         size = path.stat().st_size
     except OSError as exc:
-        raise AdminError(HTTPStatus.BAD_REQUEST, f"backup file is not readable: {exc}") from exc
+        raise AdminError(HTTPStatus.BAD_REQUEST, "backup file is not readable") from exc
     if size <= 0:
         raise AdminError(HTTPStatus.BAD_REQUEST, "backup file is empty")
     try:
         header = path.read_bytes()[:16]
     except OSError as exc:
-        raise AdminError(HTTPStatus.BAD_REQUEST, f"backup file is not readable: {exc}") from exc
+        raise AdminError(HTTPStatus.BAD_REQUEST, "backup file is not readable") from exc
     if header != b"SQLite format 3\x00":
         raise AdminError(HTTPStatus.BAD_REQUEST, "backup file must be a SQLite database")
     try:
@@ -238,7 +258,7 @@ def validate_sqlite_backup(path: Path) -> None:
         finally:
             connection.close()
     except sqlite3.DatabaseError as exc:
-        raise AdminError(HTTPStatus.BAD_REQUEST, f"backup SQLite integrity check failed: {exc}") from exc
+        raise AdminError(HTTPStatus.BAD_REQUEST, "backup SQLite integrity check failed") from exc
     if not row or str(row[0]).lower() != "ok":
         raise AdminError(HTTPStatus.BAD_REQUEST, "backup SQLite integrity check failed")
 
@@ -371,25 +391,25 @@ class AdminService:
             self.api.api("GET", "/panel/api/server/status")
             checks["xuiApi"] = {"ok": True}
         except Exception as exc:  # noqa: BLE001 - returned as health detail.
-            checks["xuiApi"] = {"ok": False, "error": str(exc)}
+            checks["xuiApi"] = {"ok": False, "error": safe_error_message(exc, "x-ui API check failed")}
 
         try:
             self._inbound()
             checks["vlessInbound"] = {"ok": True}
         except Exception as exc:  # noqa: BLE001
-            checks["vlessInbound"] = {"ok": False, "error": str(exc)}
+            checks["vlessInbound"] = {"ok": False, "error": safe_error_message(exc, "VLESS inbound check failed")}
 
         try:
             with socket.create_connection(("127.0.0.1", 443), timeout=2):
                 checks["vpnPort443"] = {"ok": True}
         except OSError as exc:
-            checks["vpnPort443"] = {"ok": False, "error": str(exc)}
+            checks["vpnPort443"] = {"ok": False, "error": safe_error_message(exc, "VPN port 443 check failed")}
 
         try:
             self.backup_dir.mkdir(parents=True, exist_ok=True)
             checks["backupDir"] = {"ok": os.access(self.backup_dir, os.R_OK | os.W_OK)}
         except OSError as exc:
-            checks["backupDir"] = {"ok": False, "error": str(exc)}
+            checks["backupDir"] = {"ok": False, "error": safe_error_message(exc, "backup directory check failed")}
 
         return {
             "status": "ok" if all(item.get("ok") for item in checks.values()) else "degraded",
@@ -626,7 +646,7 @@ def backup_freshness_check(backup_dir: Path, max_age_hours: int) -> dict[str, An
     try:
         backups = [path for path in backup_dir.glob("x-ui-*.db") if BACKUP_RE.fullmatch(path.name)]
     except OSError as exc:
-        return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": safe_error_message(exc, "backup freshness check failed")}
     if not backups:
         return {"ok": False, "error": "no backup files found", "maxAgeHours": max_age_hours}
     latest = max(backups, key=lambda path: path.stat().st_mtime)
@@ -672,7 +692,7 @@ def disk_space_check(path: Path, min_free_percent: int) -> dict[str, Any]:
         path.mkdir(parents=True, exist_ok=True)
         usage = shutil.disk_usage(path)
     except OSError as exc:
-        return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": safe_error_message(exc, "disk space check failed")}
     free_percent = int((usage.free / usage.total) * 100) if usage.total else 0
     payload = {
         "ok": free_percent >= min_free_percent,
@@ -707,7 +727,7 @@ def alert_fingerprint(health: dict[str, Any]) -> str:
 
 
 def short_error(item: dict[str, Any]) -> str:
-    error = str(item.get("error") or "")
+    error = redact_error_text(item.get("error") or "")
     if len(error) > 160:
         return error[:157] + "..."
     return error
@@ -978,7 +998,9 @@ def make_handler(service: AdminService, token: str) -> type[BaseHTTPRequestHandl
             except xui_api.ApiError as exc:
                 self._send_error(HTTPStatus.BAD_GATEWAY, "upstream 3x-ui API request failed")
             except Exception as exc:  # noqa: BLE001
-                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+                message = safe_error_message(exc, "admin API request failed")
+                self.log_error("Unhandled admin API error: %s", message)
+                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, message)
 
     return MirageAdminHandler
 

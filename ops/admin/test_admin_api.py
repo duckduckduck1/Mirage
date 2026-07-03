@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 import unittest
+from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
@@ -94,6 +95,14 @@ class FakeApi:
         if path != "/panel/api/server/getDb":
             raise AssertionError(path)
         return self.downloaded
+
+
+class FailingApi(FakeApi):
+    def api(self, method, path, data=None, expect_success=True):
+        raise admin_api.xui_api.ApiError(
+            "GET http://127.0.0.1:31453/secret-web-path failed with HTTP 500: "
+            "{'token':'api-token-value','password':'panel-password'}"
+        )
 
 
 class FakeBodyHandler:
@@ -219,6 +228,20 @@ class AdminApiTests(unittest.TestCase):
         self.assertIn("vpn.example.net", payload["hiddify"]["directLinks"][0])
         self.assertEqual(payload["v2raytun"]["manual"]["address"], "vpn.example.net")
 
+    def test_health_sanitizes_upstream_error_details(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = admin_api.AdminService(FailingApi(), backup_dir=Path(tmp))
+
+            payload = service.health()
+
+        serialized = json.dumps(payload)
+        self.assertEqual(payload["checks"]["xuiApi"]["error"], "upstream 3x-ui API request failed")
+        self.assertEqual(payload["checks"]["vlessInbound"]["error"], "upstream 3x-ui API request failed")
+        self.assertNotIn("127.0.0.1:31453", serialized)
+        self.assertNotIn("secret-web-path", serialized)
+        self.assertNotIn("api-token-value", serialized)
+        self.assertNotIn("panel-password", serialized)
+
     def test_overview_uses_sanitized_summary(self):
         with tempfile.TemporaryDirectory() as tmp:
             service = admin_api.AdminService(
@@ -286,6 +309,25 @@ class AdminApiTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.status, admin_api.HTTPStatus.BAD_REQUEST)
         self.assertEqual(files_after_import, [])
+
+    def test_validate_sqlite_backup_hides_database_error_details(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "x-ui-20260101-000000.db"
+            path.write_bytes(b"SQLite format 3\x00")
+            with patch.object(
+                admin_api.sqlite3,
+                "connect",
+                side_effect=admin_api.sqlite3.DatabaseError(
+                    "leaky /etc/x-ui/x-ui.db token=secret-value password=panel-password"
+                ),
+            ):
+                with self.assertRaises(admin_api.AdminError) as ctx:
+                    admin_api.validate_sqlite_backup(path)
+
+        self.assertEqual(ctx.exception.message, "backup SQLite integrity check failed")
+        self.assertNotIn("/etc/x-ui", ctx.exception.message)
+        self.assertNotIn("secret-value", ctx.exception.message)
+        self.assertNotIn("panel-password", ctx.exception.message)
 
     def test_delete_backup_removes_one_valid_backup(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -615,19 +657,18 @@ class AdminApiTests(unittest.TestCase):
                 with request.urlopen(x_token_req, timeout=5) as response:
                     self.assertEqual(response.status, 200)
 
-                large_profile_body = b'{"email":"' + (b"x" * admin_api.DEFAULT_JSON_BODY_MAX_BYTES) + b'"}'
-                large_req = request.Request(
-                    f"{base_url}/api/v0/profiles",
-                    data=large_profile_body,
-                    headers={
-                        "Authorization": "Bearer test-token",
-                        "Content-Type": "application/json",
-                    },
-                    method="POST",
-                )
-                with self.assertRaises(error.HTTPError) as large_ctx:
-                    request.urlopen(large_req, timeout=5)
-                self.assertEqual(large_ctx.exception.code, 413)
+                connection = HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+                try:
+                    connection.putrequest("POST", "/api/v0/profiles")
+                    connection.putheader("Authorization", "Bearer test-token")
+                    connection.putheader("Content-Type", "application/json")
+                    connection.putheader("Content-Length", str(admin_api.DEFAULT_JSON_BODY_MAX_BYTES + 1))
+                    connection.endheaders()
+                    large_response = connection.getresponse()
+                    self.assertEqual(large_response.status, 413)
+                    large_response.read()
+                finally:
+                    connection.close()
 
                 req = request.Request(
                     f"{base_url}/api/v0/profiles",
@@ -686,6 +727,38 @@ class AdminApiTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
+    def test_http_handler_sanitizes_unexpected_error_details(self):
+        service = admin_api.AdminService(FakeApi())
+
+        def fail_with_secret():
+            raise RuntimeError("leaky http://127.0.0.1:31453/secret token=secret-value")
+
+        service.list_profiles = fail_with_secret
+        server = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            admin_api.make_handler(service, "test-token"),
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base_url = f"http://127.0.0.1:{server.server_address[1]}"
+        try:
+            req = request.Request(
+                f"{base_url}/api/v0/profiles",
+                headers={"Authorization": "Bearer test-token"},
+            )
+            with self.assertRaises(error.HTTPError) as ctx:
+                request.urlopen(req, timeout=5)
+            body = ctx.exception.read().decode("utf-8")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        self.assertEqual(ctx.exception.code, 500)
+        self.assertIn("admin API request failed", body)
+        self.assertNotIn("127.0.0.1:31453", body)
+        self.assertNotIn("secret-value", body)
+
     def test_backup_freshness_check_uses_latest_backup(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "x-ui-20260101-000000.db"
@@ -729,6 +802,30 @@ class AdminApiTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(notifier.messages, [])
+
+    def test_alert_text_redacts_sensitive_error_details(self):
+        text = admin_api.format_alert_text(
+            {
+                "status": "degraded",
+                "checks": {
+                    "xuiApi": {
+                        "ok": False,
+                        "error": (
+                            "GET http://127.0.0.1:31453/secret-web-path failed "
+                            "Authorization: Bearer secret-token password=panel-password"
+                        ),
+                    }
+                },
+            }
+        )
+
+        self.assertIn("<redacted-url>", text)
+        self.assertIn("Bearer <redacted>", text)
+        self.assertIn("password=<redacted>", text)
+        self.assertNotIn("127.0.0.1:31453", text)
+        self.assertNotIn("secret-web-path", text)
+        self.assertNotIn("secret-token", text)
+        self.assertNotIn("panel-password", text)
 
     def test_alert_monitor_handles_notifier_errors(self):
         with tempfile.TemporaryDirectory() as tmp:
