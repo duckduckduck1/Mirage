@@ -1,214 +1,178 @@
-# Бэкап 3x-ui
+# Бэкапы и восстановление
 
-Runbook описывает первый ручной бэкап 3x-ui и правила хранения backup-файлов.
-Бэкап нужен до ротации секретов, добавления резервных протоколов и любого
-переезда на новый VPS.
+Этот runbook описывает backup lifecycle Mirage v0.1: автоматический backup,
+ручной backup, импорт и восстановление базы 3x-ui.
 
-Не добавляй backup-файлы, дампы базы, `x-ui.db`, DSN, пароли, UUID, `vless://`
-ссылки, приватные ключи Reality и Telegram bot token в git.
+Backup-файлы, дампы базы, `x-ui.db`, client links, UUID, token, пароли и Reality
+private key не добавляй в git.
 
-## Что входит в бэкап
+## Что хранит backup
 
-Минимальный backup-набор:
+Backup базы 3x-ui содержит:
 
-- база 3x-ui: клиенты, inbound'ы, UUID, лимиты, Reality-параметры, short IDs;
-- настройки панели: порт панели, `WEB_BASE_PATH`, subscription URI path;
-- сведения о домене: `vpn.ДОМЕН`, `sub.ДОМЕН`, TTL и DNS-провайдер;
-- список открытых портов: `22/tcp`, `443/tcp` и опциональные резервные порты;
-- версия 3x-ui и Xray;
-- дата проверки восстановления.
+- inbound'ы;
+- клиентов;
+- UUID и лимиты;
+- Reality-параметры;
+- short IDs;
+- настройки подписок 3x-ui.
 
-Храни секретные значения в менеджере паролей. Backup-файл храни отдельно от git:
-локально в защищённой папке, в зашифрованном облаке или в password manager,
-который умеет файлы.
+Он не заменяет менеджер паролей. Отдельно храни `access.md`, пароль панели,
+`WEB_BASE_PATH`, API token и SSH-ключи.
 
-## Имена файлов
+## Где лежат backup-файлы
 
-Используй понятные имена без реального IP:
+После deploy:
 
 ```text
-mirage-xui-YYYYMMDD-HHMM.db
-mirage-xui-YYYYMMDD-HHMM.dump
-mirage-xui-YYYYMMDD-HHMM.notes.md
+/home/mirage/mirage-vpn/backups
 ```
 
-Пример:
-
-```text
-mirage-xui-20260628-2130.db
-```
-
-Не добавляй в имя файла домен, IP или имя провайдера.
-
-## Быстрый бэкап через панель
-
-1. Открой SSH-туннель к панели:
-
-   ```powershell
-   ssh -N -i $HOME\.ssh\mirage_ed25519 -L 2096:127.0.0.1:ПОРТ_ПАНЕЛИ mirage@SERVER_IP
-   ```
-
-2. Открой:
-
-   ```text
-   http://localhost:2096/WEB_BASE_PATH
-   ```
-
-3. Войди в 3x-ui.
-4. Открой **Бэкап и восстановление**.
-5. Нажми **Экспорт**, **Backup** или кнопку с похожим названием.
-6. Сохрани файл вне репозитория.
-7. Переименуй файл по схеме:
-
-   ```text
-   mirage-xui-YYYYMMDD-HHMM.db
-   ```
-
-8. Сохрани рядом отдельную заметку `mirage-xui-YYYYMMDD-HHMM.notes.md` вне git.
-
-Минимальная заметка:
-
-```text
-Дата:
-3x-ui version:
-Xray version:
-Панель: 127.0.0.1:ПОРТ_ПАНЕЛИ
-VPN-домен: vpn.ДОМЕН
-Subscription-домен: sub.ДОМЕН
-Inbound: VLESS Reality :443
-Reserve inbound:
-Проверка восстановления:
-```
-
-## Ручной бэкап SQLite
-
-Если 3x-ui использует SQLite, база по умолчанию лежит в `/etc/x-ui`. Проверь путь:
+Проверь:
 
 ```bash
-sudo ls -la /etc/x-ui
+ls -lah /home/mirage/mirage-vpn/backups
 ```
 
-Сделай копию на VPS:
+Директория закрыта правами и не входит в git.
+
+## Автоматический backup
+
+Deploy устанавливает systemd timer:
 
 ```bash
-sudo install -d -m 700 /home/mirage/backups/x-ui
-sudo cp -a /etc/x-ui/x-ui.db /home/mirage/backups/x-ui/mirage-xui-YYYYMMDD-HHMM.db
-sudo chown mirage:mirage /home/mirage/backups/x-ui/mirage-xui-YYYYMMDD-HHMM.db
+systemctl status mirage-xui-backup.timer --no-pager
 ```
 
-Скачай файл на локальную машину:
-
-```powershell
-scp -i $HOME\.ssh\mirage_ed25519 mirage@SERVER_IP:/home/mirage/backups/x-ui/mirage-xui-YYYYMMDD-HHMM.db BACKUP_LOCAL_DIR\
-```
-
-После скачивания проверь, что backup-файл лежит вне репозитория Mirage.
-
-## Ручной бэкап PostgreSQL
-
-Если 3x-ui использует PostgreSQL, не копируй DSN в документацию. Возьми DSN из
-защищённого места на сервере или из менеджера паролей и выполни дамп:
+Ручной запуск той же процедуры:
 
 ```bash
-pg_dump "XUI_DB_DSN" --format=custom --file=/home/mirage/backups/x-ui/mirage-xui-YYYYMMDD-HHMM.dump
+sudo /usr/local/bin/mirage-xui-backup
 ```
 
-Ограничь доступ к файлу:
+Retention задаётся в `ops/admin/.env.local`:
+
+```env
+MIRAGE_ADMIN_BACKUP_RETENTION_DAYS=14
+MIRAGE_ADMIN_BACKUP_KEEP_MIN=3
+```
+
+## Backup через Mirage Admin
+
+1. Открой Mirage Admin через SSH-туннель.
+2. Перейди в раздел backup.
+3. Создай новый backup.
+4. Скачай файл на локальную машину, если нужна внешняя копия.
+5. Храни файл вне репозитория.
+
+Через API:
 
 ```bash
-chmod 600 /home/mirage/backups/x-ui/mirage-xui-YYYYMMDD-HHMM.dump
+MIRAGE_ADMIN_TOKEN="$(
+  sudo awk -F= '/^MIRAGE_ADMIN_TOKEN=/ {print $2; exit}' ops/admin/.env.local
+)"
+
+curl -fsS -X POST -H "Authorization: Bearer $MIRAGE_ADMIN_TOKEN" \
+  http://127.0.0.1:8090/api/v0/backups
 ```
 
-Скачай дамп локально:
+## Проверка backup
 
-```powershell
-scp -i $HOME\.ssh\mirage_ed25519 mirage@SERVER_IP:/home/mirage/backups/x-ui/mirage-xui-YYYYMMDD-HHMM.dump BACKUP_LOCAL_DIR\
-```
-
-## Автоматический бэкап через Telegram bot
-
-3x-ui умеет отправлять database backup через Telegram bot. Используй это как
-дополнительный канал, а не единственную копию.
-
-В панели открой **Настройки панели** → **Telegram Bot** и настрой:
-
-- **Telegram Bot Token**;
-- **Admin Chat ID(s)**;
-- **Notification Time**;
-- **Database Backup**;
-- **Login Notification**.
-
-Храни bot token как секрет. Не добавляй его в git и не публикуй в PR.
-
-## Проверка backup-файла
-
-После создания бэкапа проверь:
+Проверь, что backup появился в списке:
 
 ```bash
-ls -lh /home/mirage/backups/x-ui
-file /home/mirage/backups/x-ui/mirage-xui-YYYYMMDD-HHMM.db
+curl -fsS -H "Authorization: Bearer $MIRAGE_ADMIN_TOKEN" \
+  http://127.0.0.1:8090/api/v0/backups | jq
 ```
 
-Для SQLite можно дополнительно проверить базу:
+Для локальной проверки SQLite:
 
 ```bash
-sqlite3 /home/mirage/backups/x-ui/mirage-xui-YYYYMMDD-HHMM.db 'PRAGMA integrity_check;'
+sqlite3 /home/mirage/mirage-vpn/backups/BACKUP_FILE.db 'PRAGMA integrity_check;'
 ```
 
-Ожидаемый результат:
+Ожидаемо:
 
 ```text
 ok
 ```
 
-Если `sqlite3` не установлен:
+## Импорт backup
 
-```bash
-sudo apt update
-sudo apt install -y sqlite3
+Импорт через Mirage Admin сохраняет внешний SQLite backup в backup-хранилище. Он
+не заменяет live-базу автоматически.
+
+Ограничение размера задаётся в `ops/admin/.env.local`:
+
+```env
+MIRAGE_ADMIN_BACKUP_IMPORT_MAX_MB=64
 ```
 
-## Проверка восстановления
+После импорта проверь список backup-файлов и только потом запускай restore.
 
-Не считай бэкап рабочим, пока не проверен сценарий восстановления. Для первого
-полного теста используй новый VPS или временную тестовую машину:
+## Restore
 
-1. Подними базовую защиту через Ansible.
-2. Установи 3x-ui той же или совместимой версии.
-3. Останови `x-ui`.
-4. Восстанови базу или дамп.
-5. Запусти `x-ui`.
-6. Проверь панель, inbound'ы, клиентов и порты.
-7. Подключи тестовый клиент.
+Restore через Mirage Admin создаёт заявку. Root-helper:
 
-Восстановление на боевом сервере делай только после отдельного свежего бэкапа.
+1. повторно проверяет backup;
+2. делает pre-restore backup текущей базы;
+3. останавливает `x-ui`;
+4. заменяет `/etc/x-ui/x-ui.db`;
+5. запускает `x-ui`;
+6. пишет статус заявки.
+
+Проверить helper:
+
+```bash
+systemctl status mirage-admin-restore.path --no-pager
+```
+
+Restore временно прерывает VPN. На рабочем сервере выполняй его только в окно
+обслуживания.
+
+## Prune
+
+Prune удаляет старые backup-файлы по retention-политике и сохраняет минимум
+последних файлов.
+
+Через API preview:
+
+```bash
+curl -fsS -X POST \
+  -H "Authorization: Bearer $MIRAGE_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"dryRun": true}' \
+  http://127.0.0.1:8090/api/v0/backups/prune
+```
+
+Реальное удаление требует подтверждения:
+
+```bash
+curl -fsS -X POST \
+  -H "Authorization: Bearer $MIRAGE_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"dryRun": false, "confirm": "prune"}' \
+  http://127.0.0.1:8090/api/v0/backups/prune
+```
 
 ## Ротация после утечки
 
-Если клиентская ссылка, UUID, пароль панели, API token или приватный ключ Reality
-попали во внешний канал, выполни ротацию:
+Если наружу попали ссылка, UUID, пароль панели, API token или Reality private
+key:
 
-1. Сделай свежий бэкап.
+1. Сделай backup.
 2. Смени пароль панели.
-3. Смени API token, если он включён.
-4. Пересоздай клиента или обнови UUID.
-5. Перегенерируй Reality keypair, если был раскрыт приватный ключ.
-6. Экспортируй новые ссылки.
-7. Проверь подключение.
-8. Удали старые профили у клиентов.
-9. Сделай новый бэкап после ротации.
+3. Смени API token.
+4. Пересоздай затронутый профиль или весь inbound.
+5. Выдай свежие ссылки.
+6. Удали старые профили из клиентских приложений.
+7. Сделай новый backup.
 
 ## Чек-лист
 
-- [ ] Бэкап создан до добавления новых inbound'ов.
-- [ ] Backup-файл лежит вне git.
-- [ ] Пароль панели, `WEB_BASE_PATH`, API token и DSN сохранены в менеджере
-  паролей.
-- [ ] Проверена целостность SQLite или успешность `pg_dump`.
-- [ ] Описан способ восстановления.
-- [ ] После ротации создан новый backup-файл.
-
-## Справка
-
-- [3x-ui: параметры базы данных](https://github.com/MHSanaei/3x-ui/wiki/Configuration)
-- [3x-ui: Telegram bot и database backup](https://github.com/MHSanaei/3x-ui/wiki/Advanced)
+- [ ] Backup создан до рискованного изменения.
+- [ ] Backup лежит вне git.
+- [ ] Внешняя копия сохранена в защищённом месте.
+- [ ] Timer активен.
+- [ ] Restore-helper активен.
+- [ ] Restore проверен на тестовом VPS или в окно обслуживания.
