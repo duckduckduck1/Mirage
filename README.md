@@ -16,7 +16,8 @@ Mirage — репозиторий для развёртывания и эксп�
 - панель 3x-ui закрыта на `127.0.0.1` и открывается только через SSH-туннель;
 - `xui-ops` управляет 3x-ui через API из Docker-контейнера;
 - автоматизировано создание inbound и профилей `main`, `partner`, `shared`;
-- добавлены команды диагностики, бэкапа и безопасного пересоздания VPN inbound.
+- добавлены команды диагностики, бэкапа и безопасного пересоздания VPN inbound;
+- добавлена локальная Mirage Admin-панель для профилей, бэкапов, restore и alerts.
 
 Следующий крупный этап — Telegram MTProxy/FakeTLS. Он будет оформлен отдельным
 гайдом после реализации.
@@ -26,7 +27,9 @@ Mirage — репозиторий для развёртывания и эксп�
 | Часть | Назначение |
 |---|---|
 | `infra/ansible` | Первый bootstrap свежего VPS и базовая защита |
+| `ops/vpn` | Однокомандный deploy VPN, админки, бэкапов и restore helper |
 | `ops/xui` | CLI и Docker-обёртка для управления 3x-ui через API |
+| `ops/admin` | Локальная админ-панель, API, backup lifecycle, restore и alerts |
 | `docs/setup` | Пошаговое развёртывание VPN на VPS |
 | `docs/operations` | Работа с уже поднятым VPN: ссылки, клиенты, бэкапы, диагностика |
 | `docs/runbooks` | Детальные процедуры для отдельных операций |
@@ -59,9 +62,11 @@ Reality target/SNI маскирует TLS-профиль соединения, �
    [docs/operations/README.md](docs/operations/README.md).
 3. Посмотри архитектурную модель:
    [docs/architecture.md](docs/architecture.md).
-4. Перед изменениями делай бэкап:
+4. Перед релизом v0.1 пройди smoke-check:
+   [docs/runbooks/release-v0-1-smoke.md](docs/runbooks/release-v0-1-smoke.md).
+5. Перед изменениями делай бэкап:
    [docs/runbooks/backup-xui.md](docs/runbooks/backup-xui.md).
-5. Для переезда на новый VPS используй:
+6. Для переезда на новый VPS используй:
    [docs/runbooks/migrate-vps.md](docs/runbooks/migrate-vps.md).
 
 ## Безопасность секретов
@@ -81,8 +86,10 @@ Reality target/SNI маскирует TLS-профиль соединения, �
 
 - [Установка VPN на VPS](docs/setup/README.md)
 - [Эксплуатация VPN](docs/operations/README.md)
+- [Smoke-check v0.1](docs/runbooks/release-v0-1-smoke.md)
 - [Архитектура](docs/architecture.md)
 - [Технический справочник xui-ops](ops/xui/README.md)
+- [Технический справочник Mirage Admin](ops/admin/README.md)
 - [Bootstrap VPS через Ansible](docs/runbooks/bootstrap-vps-ansible.md)
 - [Бэкап 3x-ui](docs/runbooks/backup-xui.md)
 - [Миграция на новый VPS](docs/runbooks/migrate-vps.md)
