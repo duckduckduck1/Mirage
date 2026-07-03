@@ -151,11 +151,18 @@ def load_runtime_env() -> None:
     if xui_env:
         xui_api.load_env_file(Path(xui_env))
     else:
-        xui_api.load_env_file(XUI_DIR / ".env.local")
+        load_default_env_file(XUI_DIR / ".env.local")
     if admin_env:
         xui_api.load_env_file(Path(admin_env))
     else:
-        xui_api.load_env_file(CURRENT_DIR / ".env.local")
+        load_default_env_file(CURRENT_DIR / ".env.local")
+
+
+def load_default_env_file(path: Path) -> None:
+    try:
+        xui_api.load_env_file(path)
+    except PermissionError:
+        return
 
 
 def env_namespace() -> argparse.Namespace:
