@@ -35,6 +35,26 @@ VPS
 Домен не обязателен для первого запуска. Он понадобится позже для стабильных
 адресов и подписок при переезде на новый VPS.
 
+## Быстрый путь v0.1
+
+После bootstrap VPS и установки Docker основной путь развёртывания — один
+deploy-скрипт из корня репозитория:
+
+```bash
+cd /home/mirage/projects/Mirage
+git switch dev
+git pull --ff-only origin dev
+sudo bash ops/vpn/deploy.sh SERVER_HOST_OR_DOMAIN
+```
+
+Скрипт настраивает 3x-ui API, создаёт VLESS Reality inbound на `443/tcp`,
+профили `main`, `partner`, `shared`, локальную Mirage Admin-панель, backup timer,
+restore helper и access bundle в `/home/mirage/mirage-vpn/access.md`.
+
+После выполнения пройди [smoke-check v0.1](../runbooks/release-v0-1-smoke.md).
+Ниже оставлена подробная ручная процедура: она полезна для диагностики, понимания
+состава системы и точечного восстановления отдельных шагов.
+
 ## Шаг 1. Bootstrap VPS
 
 На свежем VPS зайди под `root`, установи Ansible и Git, затем запусти bootstrap

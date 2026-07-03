@@ -42,7 +42,9 @@ MIRAGE_ADMIN_GID=1000
 ```bash
 sudo install -d -m 700 -o "$MIRAGE_ADMIN_UID" -g "$MIRAGE_ADMIN_GID" \
   /home/mirage/mirage-vpn/backups \
-  /home/mirage/mirage-vpn/alerts
+  /home/mirage/mirage-vpn/alerts \
+  /home/mirage/mirage-vpn/restore-requests \
+  /home/mirage/mirage-vpn/restore-status
 ```
 
 ## Telegram alerts
@@ -117,5 +119,3 @@ pre-restore backup текущей базы, останавливает `x-ui`, �
 | `DELETE` | `/api/v0/backups/FILE?confirmName=FILE` | удалить один backup |
 | `GET` | `/api/v0/restore-requests` | список restore-заявок и статусов |
 | `GET` | `/api/v0/restore-requests/JOB_ID` | статус одной restore-заявки |
-
-Restore добавляется отдельным этапом.
