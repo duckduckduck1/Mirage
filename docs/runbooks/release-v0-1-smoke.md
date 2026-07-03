@@ -16,6 +16,7 @@ restore helper, Telegram alerts и защита секретов.
 - CI зелёный.
 - VPS доступен по SSH под пользователем `mirage`.
 - Docker установлен.
+- Node.js установлен для локальной проверки JavaScript в release gate.
 - Репозиторий находится в `/home/mirage/projects/Mirage`.
 - Проверка выполняется на тестовом или текущем VPS, где допустим короткий
   перезапуск `x-ui` при проверке restore.
@@ -38,6 +39,7 @@ export SERVER=SERVER_HOST_OR_DOMAIN
 На VPS выполни полный release gate:
 
 ```bash
+node --version || sudo apt-get install -y nodejs
 bash ops/release/check-local.sh
 ```
 
@@ -167,9 +169,10 @@ Blocker:
 На VPS:
 
 ```bash
-set -a
-. ops/admin/.env.local
-set +a
+MIRAGE_ADMIN_TOKEN="$(
+  sudo awk -F= '/^MIRAGE_ADMIN_TOKEN=/ {print $2; exit}' ops/admin/.env.local
+)"
+export MIRAGE_ADMIN_TOKEN
 
 curl -fsS http://127.0.0.1:8090/healthz | jq -e '.status == "ok"'
 

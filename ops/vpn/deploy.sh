@@ -98,6 +98,18 @@ env_file_value() {
   awk -F= -v key="$key" '$1 == key {print substr($0, length(key) + 2); exit}' "$file"
 }
 
+is_weak_admin_token() {
+  local token
+  token="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')"
+  [[ ${#token} -lt 32 ]] && return 0
+  case "$token" in
+    change_me|change_me_long_random_token|changeme|password|secret|token)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 random_port() {
   shuf -i 10000-60000 -n 1
 }
@@ -113,7 +125,7 @@ install_packages() {
   log "Installing base packages"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install -y ca-certificates curl jq openssl python3 ufw docker.io
+  apt-get install -y ca-certificates curl jq nodejs openssl python3 ufw docker.io
 
   if ! docker compose version >/dev/null 2>&1; then
     apt-get install -y docker-compose-v2 || apt-get install -y docker-compose-plugin
@@ -240,6 +252,9 @@ write_admin_env() {
     admin_token="$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_TOKEN || true)"
   fi
   admin_token="${admin_token:-${MIRAGE_ADMIN_TOKEN:-$(random_hex 24)}}"
+  if is_weak_admin_token "$admin_token"; then
+    admin_token="$(random_hex 24)"
+  fi
 
   local admin_uid admin_gid
   admin_uid="${MIRAGE_ADMIN_UID:-$ADMIN_RUNTIME_UID}"
@@ -284,6 +299,18 @@ EOF
 start_admin_api() {
   log "Starting Mirage Admin API"
   docker compose --env-file "$ADMIN_ENV_FILE" -f "$ADMIN_COMPOSE_FILE" up -d --build
+  local admin_port
+  admin_port="${MIRAGE_ADMIN_PORT:-$DEFAULT_ADMIN_PORT}"
+  for _ in $(seq 1 20); do
+    if curl -fsS "http://127.0.0.1:${admin_port}/healthz" >/dev/null 2>&1; then
+      return
+    fi
+    sleep 1
+  done
+
+  docker compose --env-file "$ADMIN_ENV_FILE" -f "$ADMIN_COMPOSE_FILE" ps >&2 || true
+  docker compose --env-file "$ADMIN_ENV_FILE" -f "$ADMIN_COMPOSE_FILE" logs --tail=200 mirage-admin >&2 || true
+  die "Mirage Admin API did not become healthy on 127.0.0.1:${admin_port}"
 }
 
 ensure_api_token() {
@@ -467,18 +494,18 @@ render_access_file() {
     printf '# Mirage VPN access\n\n'
     printf 'Generated: %s\n\n' "$(date -Is)"
     printf '## Mirage Admin\n\n'
-    printf '- Local URL after SSH tunnel: `%s`\n' "$admin_url"
-    printf '- SSH tunnel command from Windows PowerShell: `%s`\n' "$admin_tunnel_command"
-    printf '- API token: `%s`\n\n' "${admin_token:-stored in $ADMIN_ENV_FILE}"
+    printf -- '- Local URL after SSH tunnel: `%s`\n' "$admin_url"
+    printf -- '- SSH tunnel command from Windows PowerShell: `%s`\n' "$admin_tunnel_command"
+    printf -- '- API token: `%s`\n\n' "${admin_token:-stored in $ADMIN_ENV_FILE}"
     printf '## Panel\n\n'
-    printf '- Public host: `%s`\n' "$PUBLIC_HOST"
-    printf '- Panel port on VPS: `%s`\n' "$XUI_PANEL_PORT"
-    printf '- Web base path: `/%s`\n' "$XUI_WEB_BASE_PATH"
-    printf '- Local browser URL after SSH tunnel: `%s`\n' "$tunnel_url"
-    printf '- SSH tunnel command from Windows PowerShell: `%s`\n' "$tunnel_command"
-    printf '- Username: `%s`\n' "${XUI_USERNAME:-stored in $XUI_INSTALL_RESULT}"
-    printf '- Password: `%s`\n' "${XUI_PASSWORD:-stored in $XUI_INSTALL_RESULT}"
-    printf '- API token: `%s`\n\n' "${XUI_API_TOKEN:-stored in $XUI_ENV_FILE}"
+    printf -- '- Public host: `%s`\n' "$PUBLIC_HOST"
+    printf -- '- Panel port on VPS: `%s`\n' "$XUI_PANEL_PORT"
+    printf -- '- Web base path: `/%s`\n' "$XUI_WEB_BASE_PATH"
+    printf -- '- Local browser URL after SSH tunnel: `%s`\n' "$tunnel_url"
+    printf -- '- SSH tunnel command from Windows PowerShell: `%s`\n' "$tunnel_command"
+    printf -- '- Username: `%s`\n' "${XUI_USERNAME:-stored in $XUI_INSTALL_RESULT}"
+    printf -- '- Password: `%s`\n' "${XUI_PASSWORD:-stored in $XUI_INSTALL_RESULT}"
+    printf -- '- API token: `%s`\n\n' "${XUI_API_TOKEN:-stored in $XUI_ENV_FILE}"
     printf '## Clients\n\n'
     for client in $DEFAULT_CLIENTS; do
       printf '### %s\n\n' "$client"
@@ -493,18 +520,18 @@ render_access_file() {
       printf '\n'
     done
     printf '## Backups\n\n'
-    printf '- Backup directory: `%s`\n' "$BACKUP_DIR"
-    printf '- Retention days: `%s`\n' "$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_BACKUP_RETENTION_DAYS || printf '14')"
-    printf '- Minimum kept backups: `%s`\n' "$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_BACKUP_KEEP_MIN || printf '3')"
-    printf '- Timer: `mirage-xui-backup.timer`\n'
-    printf '- Manual backup: `sudo /usr/local/bin/mirage-xui-backup`\n'
-    printf '- Restore requests: `%s`\n' "$RESTORE_REQUEST_DIR"
-    printf '- Restore status: `%s`\n' "$RESTORE_STATUS_DIR"
-    printf '- Restore helper: `mirage-admin-restore.path`\n'
+    printf -- '- Backup directory: `%s`\n' "$BACKUP_DIR"
+    printf -- '- Retention days: `%s`\n' "$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_BACKUP_RETENTION_DAYS || printf '14')"
+    printf -- '- Minimum kept backups: `%s`\n' "$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_BACKUP_KEEP_MIN || printf '3')"
+    printf -- '- Timer: `mirage-xui-backup.timer`\n'
+    printf -- '- Manual backup: `sudo /usr/local/bin/mirage-xui-backup`\n'
+    printf -- '- Restore requests: `%s`\n' "$RESTORE_REQUEST_DIR"
+    printf -- '- Restore status: `%s`\n' "$RESTORE_STATUS_DIR"
+    printf -- '- Restore helper: `mirage-admin-restore.path`\n'
     printf '\n## Telegram alerts\n\n'
-    printf '- Enabled: `%s`\n' "$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ALERTS_ENABLED || printf 'false')"
-    printf '- State directory: `%s`\n' "$OUTPUT_DIR/alerts"
-    printf '- Service: `mirage-alerts`\n'
+    printf -- '- Enabled: `%s`\n' "$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ALERTS_ENABLED || printf 'false')"
+    printf -- '- State directory: `%s`\n' "$OUTPUT_DIR/alerts"
+    printf -- '- Service: `mirage-alerts`\n'
   } > "$access_file"
 
   chmod 600 "$access_file"
