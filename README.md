@@ -1,74 +1,221 @@
 # Mirage
 
-> Самостоятельно развёрнутый VPN + Telegram-прокси с маскировкой трафика и
-> упором на **быструю миграцию между серверами без потерь для пользователей**.
+Mirage превращает свежий VPS в управляемый VPN-сервер. Проект поднимает
+Xray/3x-ui, настраивает VLESS Reality на `443/tcp`, создаёт профили доступа,
+запускает локальную админ-панель и включает бэкапы.
 
-**Статус:** 🚧 в разработке (фаза проектирования). Это учебный pet-проект под роль
-**DevOps / SRE**: поднять рабочий сетевой сервис на собственном Linux-VPS и
-разобраться, как устроены сети, контейнеры и инфраструктура.
+Сервер можно заменить быстро: конфигурация, профили, бэкапы и команды
+развёртывания живут в одном репозитории, а рабочие секреты остаются вне git.
 
-## Что это
+## Что входит в v0.1
 
-Mirage — это связка из двух сервисов на арендованном VPS:
+- безопасный bootstrap VPS через Ansible;
+- установка Docker, 3x-ui/Xray и Mirage Admin одной командой;
+- VLESS Reality на `443/tcp`;
+- профили `main`, `partner`, `shared` и возможность создавать новые имена;
+- Mirage Admin на `127.0.0.1:8090`;
+- панель 3x-ui только через SSH-туннель;
+- Telegram alerts;
+- автоматические и ручные бэкапы базы 3x-ui;
+- импорт, скачивание и восстановление бэкапа.
 
-- **VPN** — Xray-core (VLESS + Reality + XTLS-Vision) под панелью 3x-ui.
-  Соединение для систем фильтрации (DPI) неотличимо от обычного захода на
-  разрешённый сайт.
-- **Telegram-прокси** — `mtg` (MTProto, режим FakeTLS) с маскировкой под `vk.ru`.
+## Быстрый старт
 
-В резерве — Shadowsocks-2022 на случай блокировки основного протокола.
+Полный путь описан в [руководстве](docs/guide.md). Ниже короткая версия для уже
+подготовленного VPS.
 
-## Ключевая идея: IP как расходник
-
-Блокировки идут постоянно, поэтому проект спроектирован так, чтобы **смена сервера
-или IP не требовала никаких действий от друзей-пользователей**:
-
-- раздаём только **subscription-ссылки** (единый источник правды), а не голые
-  конфиги — при переезде правится только сервер, клиенты подхватывают новое сами;
-- адрес подписки привязан к **домену**, а не к IP;
-- сервер пересоздаётся из кода (**Terraform + Ansible**) за минуты;
-- БД панели и конфиги — в бэкапе.
-
-Подробнее — в [документации по архитектуре](docs/architecture.md).
-
-## Стек
-
-| Слой | Технологии |
-|---|---|
-| Сервер | Ubuntu/Debian VPS, `systemd`, `ufw`, `fail2ban` |
-| VPN | Xray-core (VLESS + Reality + Vision), панель 3x-ui, Shadowsocks-2022 (резерв) |
-| Telegram | `mtg` (MTProto FakeTLS) в Docker |
-| Инфраструктура (план) | Terraform, Ansible, Docker Compose |
-| Наблюдаемость (план) | Prometheus, Grafana, Alertmanager |
-
-## Структура репозитория
-
+```bash
+cd /home/mirage/projects/Mirage
+git switch dev
+git pull --ff-only origin dev
+sudo bash ops/vpn/deploy.sh SERVER_HOST_OR_DOMAIN
 ```
-.
-├── README.md            — этот файл
-├── CONTRIBUTING.md      — правила веток, коммитов и PR
-├── docs/
-│   ├── architecture.md  — архитектура и дизайн миграции
-│   ├── style-guide.md   — стиль документации (на базе Google dev docs style)
-│   └── adr/             — Architecture Decision Records (журнал решений)
-├── guide/               — учебный гайд по сборке (теория + пошаговая практика)
-└── .github/             — шаблоны PR и задач
+
+В конце deploy покажет основные пути:
+
+```text
+Access file: /home/mirage/mirage-vpn/access.md
+Links directory: /home/mirage/mirage-vpn/links
+Backup directory: /home/mirage/mirage-vpn/backups
 ```
+
+Сразу сохрани файл доступа:
+
+```bash
+sudo cat /home/mirage/mirage-vpn/access.md
+```
+
+`access.md` содержит token Mirage Admin, команды SSH-туннелей, параметры 3x-ui и
+пути к профилям. Это секретный файл. Не отправляй его в чат, issue, pull request
+и не добавляй в git.
+
+## Первые настройки
+
+### Открой Mirage Admin
+
+На локальной машине:
+
+```powershell
+ssh -i $HOME\.ssh\mirage_ed25519 -N -L 8090:127.0.0.1:8090 mirage@SERVER_HOST_OR_DOMAIN
+```
+
+Открой в браузере:
+
+```text
+http://127.0.0.1:8090/
+```
+
+Token возьми из `/home/mirage/mirage-vpn/access.md`.
+
+### Включи Telegram alerts
+
+Создай бота через BotFather, открой его в Telegram и отправь боту любое
+сообщение. Token не публикуй.
+
+На VPS:
+
+```bash
+read -r -s -p "BOT_TOKEN: " TG_BOT_TOKEN; echo
+TG_BOT_TOKEN="$(printf '%s' "$TG_BOT_TOKEN" | tr -d '\r\n ')"
+
+curl -fsS "https://api.telegram.org/bot${TG_BOT_TOKEN}/getUpdates" \
+  | jq -r '.result[-1].message.chat.id // empty'
+```
+
+Если команда ничего не вывела, отправь боту ещё одно сообщение и повтори её.
+
+Открой настройки:
+
+```bash
+cd /home/mirage/projects/Mirage
+sudoedit ops/admin/.env.local
+```
+
+Задай значения:
+
+```env
+MIRAGE_ALERTS_ENABLED=true
+MIRAGE_ALERT_TELEGRAM_BOT_TOKEN=PASTE_BOT_TOKEN
+MIRAGE_ALERT_TELEGRAM_CHAT_ID=PASTE_CHAT_ID
+```
+
+Перезапусти админку и отправь тест:
+
+```bash
+sudo docker compose --env-file ops/admin/.env.local -f ops/admin/compose.yml up -d --build
+
+MIRAGE_ADMIN_TOKEN="$(
+  sudo awk -F= '/^MIRAGE_ADMIN_TOKEN=/ {print $2; exit}' ops/admin/.env.local
+)"
+
+curl -fsS -X POST \
+  -H "Authorization: Bearer $MIRAGE_ADMIN_TOKEN" \
+  http://127.0.0.1:8090/api/v0/alerts/test
+```
+
+### Получи VPN-профили
+
+Готовые профили лежат на VPS:
+
+```text
+/home/mirage/mirage-vpn/links/main.profile.txt
+/home/mirage/mirage-vpn/links/partner.profile.txt
+/home/mirage/mirage-vpn/links/shared.profile.txt
+```
+
+Вывести профиль заново:
+
+```bash
+cd /home/mirage/projects/Mirage
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops subscriptions --email main
+```
+
+Создать новый профиль:
+
+```bash
+sudo docker compose -f ops/xui/compose.yml run --rm xui-ops ensure-client \
+  --email CLIENT_NAME \
+  --print-links
+```
+
+Используй технические имена: `phone`, `tablet`, `friend-a`. Не используй ФИО,
+телефоны и другие личные данные.
+
+### Проверь бэкапы
+
+```bash
+systemctl status mirage-xui-backup.timer --no-pager
+sudo /usr/local/bin/mirage-xui-backup
+ls -lah /home/mirage/mirage-vpn/backups
+```
+
+Скачать конкретный файл на локальную машину:
+
+```powershell
+scp -i $HOME\.ssh\mirage_ed25519 mirage@SERVER_HOST_OR_DOMAIN:/home/mirage/mirage-vpn/backups/BACKUP_FILE.db .
+```
+
+Скачивать, импортировать и восстанавливать бэкапы удобнее через Mirage Admin.
+Перед восстановлением или пересозданием VPN inbound всегда делай свежий бэкап.
+
+## Проверка
+
+На VPS:
+
+```bash
+sudo -E bash ops/release/check-local.sh
+sudo ss -tlnp | grep -E ':443|127.0.0.1:8090'
+sudo ufw status numbered
+```
+
+С локальной машины:
+
+```powershell
+$Server = "SERVER_HOST_OR_DOMAIN"
+$PanelPort = PANEL_PORT
+
+Test-NetConnection $Server -Port 443
+Test-NetConnection $Server -Port 8090
+Test-NetConnection $Server -Port $PanelPort
+```
+
+Ожидаемо:
+
+- `443/tcp` доступен снаружи;
+- `8090` снаружи закрыт;
+- порт панели 3x-ui снаружи закрыт;
+- Mirage Admin и 3x-ui открываются только через SSH-туннель.
 
 ## Документация
 
-- [Архитектура](docs/architecture.md)
-- [Как контрибьютить (ветки, коммиты, PR)](CONTRIBUTING.md)
-- [Стиль документации](docs/style-guide.md)
-- [Журнал архитектурных решений (ADR)](docs/adr/)
-- [Учебный гайд по сборке](guide/vpn-vless-reality-3x-ui.md)
+- [Руководство](docs/guide.md) - установка, настройка, обслуживание и
+  восстановление.
+- [Архитектура](docs/architecture.md) - как устроен стек.
+- [Mirage Admin](ops/admin/README.md) - технический справочник панели и API.
+- [xui-ops](ops/xui/README.md) - технический справочник CLI.
+
+## Безопасность
+
+Не добавляй в git:
+
+- `.env.local`, `users.local.json`, backup-файлы и дампы базы;
+- `access.md`, клиентские ссылки и subscription-ссылки;
+- UUID, Reality private key, short IDs;
+- пароль панели, API token, `WEB_BASE_PATH`;
+- реальные IP и домены, если они раскрывают рабочую инфраструктуру.
+
+Храни секреты и бэкапы в менеджере паролей или другом защищённом хранилище.
+
+## Структура
+
+| Путь | Назначение |
+|---|---|
+| `ops/vpn` | однокомандный deploy |
+| `ops/admin` | локальная админ-панель, alerts и бэкапы |
+| `ops/xui` | управление 3x-ui через API |
+| `infra/ansible` | первый bootstrap VPS |
+| `docs` | руководство и архитектура |
 
 ## Лицензия
 
 [MIT](LICENSE).
-
----
-
-> ⚠️ Проект предназначен для личного и образовательного использования —
-> разобраться в сетях и дать доступ близким. Используй ответственно и в рамках
-> законодательства твоей юрисдикции.

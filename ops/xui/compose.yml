@@ -1,0 +1,12 @@
+services:
+  xui-ops:
+    build:
+      context: ../..
+      dockerfile: ops/xui/Dockerfile
+    image: mirage-xui-ops:local
+    network_mode: host
+    env_file:
+      - .env.local
+    volumes:
+      - .:/app/ops/xui:ro
+      - ../../backups:/app/backups

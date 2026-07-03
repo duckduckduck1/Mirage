@@ -1,0 +1,15 @@
+# Скопируй этот файл в group_vars/all.yml на VPS, если нужно переопределить
+# значения по умолчанию. Не коммить group_vars/all.yml, если там есть
+# параметры конкретного хоста.
+
+admin_user: mirage
+admin_public_key_file: /root/.ssh/mirage_ed25519.pub
+
+allowed_tcp_ports:
+  - 22
+  - 443
+
+revoked_tcp_ports: []
+
+# Оставь false для первого запуска. Включай только после проверки входа по ключу.
+enable_ssh_hardening: false

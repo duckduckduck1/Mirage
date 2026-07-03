@@ -1,0 +1,16 @@
+---
+admin_user: mirage
+admin_shell: /bin/bash
+admin_sudo_group: sudo
+admin_sudoers_file: "/etc/sudoers.d/90-{{ admin_user }}-admin"
+
+# Prefer a file on the VPS. You can also pass admin_public_key with -e.
+admin_public_key: ""
+admin_public_key_file: "{{ lookup('ansible.builtin.env', 'MIRAGE_ADMIN_PUBLIC_KEY_FILE') | default('/root/.ssh/mirage_ed25519.pub', true) }}"
+
+mirage_backup_root: /root/mirage-backups
+mirage_backup_paths:
+  - /etc/ssh
+  - /etc/sudoers
+  - /etc/sudoers.d
+  - /etc/ufw

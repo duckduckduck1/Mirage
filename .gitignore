@@ -6,8 +6,13 @@
 *.crt
 *.p12
 secrets/
-config.toml              # mtg: содержит FakeTLS-секрет, генерится на сервере
-mtg/config.toml
+backups/
+exports/
+*.backup
+*.dump
+*.db
+*.sqlite
+*.sqlite3
 !*.example
 
 # === Terraform ===
@@ -24,16 +29,24 @@ crash.log
 vault-password*
 .vault_pass*
 *.vault
+infra/ansible/group_vars/*.yml
+!infra/ansible/group_vars/*.example.yml
+infra/ansible/host_vars/
+infra/ansible/inventory/*.local.*
+infra/ansible/*.log
 
 # === Логи и временное ===
 *.log
 tmp/
+.tmp/
 
 # === Python (скрипты/утилиты) ===
 __pycache__/
 *.py[cod]
 .venv/
 venv/
+ops/xui/*.local.json
+ops/xui/output/
 
 # === ОС и редакторы ===
 .DS_Store

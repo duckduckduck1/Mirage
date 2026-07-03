@@ -1,0 +1,19 @@
+{
+  "clients": [
+    {
+      "email": "main",
+      "comment": "owner devices",
+      "group": "default"
+    },
+    {
+      "email": "partner",
+      "comment": "partner devices",
+      "group": "default"
+    },
+    {
+      "email": "shared",
+      "comment": "shared access",
+      "group": "default"
+    }
+  ]
+}
