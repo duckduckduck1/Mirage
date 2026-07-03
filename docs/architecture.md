@@ -1,29 +1,32 @@
 # Архитектура
 
-Mirage v0.1 — это один VPS с Xray/3x-ui, локальной админ-панелью и
-автоматизацией вокруг API 3x-ui. Система рассчитана на быстрый перенос на новый
-VPS: IP считается расходником, а конфигурация хранится в бэкапах.
+Mirage v0.1 работает как один самодостаточный VPS. Публичным остаётся только
+VPN-вход, а панели управления открываются через SSH-туннель.
 
-## Цели
+## Схема
 
-- Поднять рабочий VPN на свежем VPS без ручной настройки каждого компонента.
-- Держать публичным только нужный VPN-порт.
-- Выдавать отдельные профили участникам.
-- Делать backup и восстановление базы 3x-ui.
-- Сохранить путь к миграции при блокировке IP.
+```mermaid
+flowchart LR
+    user["VPN-клиент"] -->|VLESS Reality :443| xray["Xray"]
+    operator["Оператор"] -->|SSH tunnel :8090| admin["Mirage Admin"]
+    operator -->|SSH tunnel| xui["3x-ui"]
+    admin --> api["3x-ui API"]
+    ops["xui-ops"] --> api
+    api --> xray
+    backup[("x-ui.db backups")] --> admin
+```
 
 ## Компоненты
 
-| Компонент | Роль |
+| Компонент | Что делает |
 |---|---|
-| VPS | хост с публичным IP |
-| Ansible | первый bootstrap доступа, `ufw`, `fail2ban`, SSH-hardening |
-| 3x-ui | панель управления Xray и клиентами |
-| Xray-core | VLESS Reality на `443/tcp` |
-| xui-ops | CLI-автоматизация 3x-ui через API |
-| Mirage Admin | локальная админ-панель для профилей, бэкапов и диагностики |
-| backup timer | ежедневный backup базы 3x-ui |
-| restore-helper | безопасное восстановление backup через root-helper |
+| Ansible | готовит свежий VPS, SSH, `ufw`, `fail2ban` |
+| 3x-ui | хранит inbound'ы, клиентов и параметры Xray |
+| Xray | принимает VLESS Reality на `443/tcp` |
+| xui-ops | автоматизирует 3x-ui через API |
+| Mirage Admin | даёт локальную панель для профилей, бэкапов и диагностики |
+| backup timer | ежедневно сохраняет базу 3x-ui |
+| restore helper | восстанавливает backup с root-доступом |
 
 ## Порты
 
@@ -34,90 +37,49 @@ VPS: IP считается расходником, а конфигурация �
 | `127.0.0.1:8090` | локальный | Mirage Admin |
 | `127.0.0.1:ПОРТ_ПАНЕЛИ` | локальный | 3x-ui |
 
-Порты `8388`, `8443`, `9443`, `2096` не входят в текущий публичный контур v0.1.
-Deploy удаляет старые `ufw`-правила для этих портов.
+Порты админки и 3x-ui не открываются в `ufw`. Если они доступны снаружи, это
+ошибка конфигурации.
 
-## Сетевой поток
+## Профили
 
-```mermaid
-flowchart LR
-    client["VPN-клиент"] -->|VLESS Reality :443| xray["Xray на VPS"]
-    adminUser["Оператор"] -->|SSH tunnel :8090| admin["Mirage Admin"]
-    admin --> xuiApi["3x-ui API"]
-    ops["xui-ops"] --> xuiApi
-    xuiApi --> xray
-    backup[("Бэкапы x-ui.db")] --> admin
-```
+Deploy создаёт три профиля:
 
-Клиент подключается к `SERVER_HOST_OR_DOMAIN:443`. Для DPI соединение выглядит
-как TLS-трафик к Reality target. В текущей конфигурации по умолчанию используется
-`www.amazon.com`; `www.microsoft.com` подходит как резервный кандидат.
-
-Reality помогает против протокольной фильтрации и активного зондирования, но не
-защищает сам IP VPS. Если IP заблокирован, нужен новый VPS и восстановление из
-backup.
-
-## Модель профилей
-
-Deploy создаёт три базовых профиля:
-
-- `main` — основной профиль владельца;
+- `main` — основной профиль;
 - `partner` — отдельный близкий профиль;
-- `shared` — общий профиль для остальных.
+- `shared` — общий профиль.
 
-Новые профили создаются через Mirage Admin или `xui-ops ensure-client`. Имена
-профилей должны быть техническими: без ФИО, телефонов и личных данных.
+Дополнительные профили создаются в Mirage Admin или через
+`xui-ops ensure-client`. Используй технические имена без личных данных.
 
-## Секреты
+## Reality target
 
-Секретами считаются:
+По умолчанию Mirage использует `www.amazon.com:443` как Reality target/SNI.
+`www.microsoft.com:443` подходит как резервный кандидат.
 
-- `.env.local`;
-- `access.md`;
-- client links и subscription links;
-- UUID, short IDs, Reality private key;
-- API token, пароль панели и `WEB_BASE_PATH`;
-- backup-файлы.
+Reality помогает маскировать TLS-профиль и снижает риск активного зондирования,
+но не защищает сам IP VPS. Если IP заблокирован, сервер нужно заменить и
+восстановить конфигурацию из backup.
 
-Эти данные не попадают в git. Generated-файлы лежат в
-`/home/mirage/mirage-vpn/` с закрытыми правами.
+## Backup и миграция
 
-## Backup и restore
+Главный артефакт восстановления — база 3x-ui. В ней находятся inbound'ы,
+клиенты, UUID, Reality-параметры и short IDs.
 
-3x-ui хранит рабочую конфигурацию в базе. Поэтому backup базы 3x-ui — главный
-артефакт восстановления. Mirage добавляет:
+Миграция выглядит так:
 
-- ежедневный `mirage-xui-backup.timer`;
-- backup API в Mirage Admin;
-- import backup;
-- restore-заявки через `mirage-admin-restore.path`.
+1. Поднять новый VPS.
+2. Выполнить Ansible bootstrap.
+3. Запустить `ops/vpn/deploy.sh`.
+4. Импортировать актуальный backup через Mirage Admin.
+5. Выполнить restore.
+6. Проверить `443/tcp`, профили и клиентские приложения.
 
-Restore временно прерывает VPN, поэтому на рабочем сервере его выполняют только
-в окно обслуживания.
+Подробные команды есть в [руководстве](guide.md).
 
-## Миграция
+## Что не входит в v0.1
 
-Базовый сценарий:
-
-1. Поднять новый VPS через Ansible bootstrap.
-2. Развернуть Mirage через `ops/vpn/deploy.sh`.
-3. Восстановить backup базы 3x-ui.
-4. Проверить `vpn-diagnose`, `443/tcp`, Admin API и клиент.
-5. Обновить домен или выдать свежие профили.
-
-Подробно: [миграция на новый VPS](runbooks/migrate-vps.md).
-
-## План после v0.1
-
-- Домен и стабильные subscription-ссылки.
-- MTProxy/FakeTLS для Telegram.
-- Более полный Ansible provisioning сервисов.
-- Terraform при переходе к провайдеру с API.
-- Расширенная наблюдаемость.
-
-## Связанные документы
-
-- [Развёртывание](deploy.md)
-- [Эксплуатация](operations.md)
-- [Release-check v0.1](release-v0.1.md)
-- [ADR](adr/)
+- публичный subscription-домен;
+- Telegram MTProxy/FakeTLS;
+- Terraform provisioning;
+- multi-node схема;
+- автоматический failover.

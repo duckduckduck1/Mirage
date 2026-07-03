@@ -1,20 +1,14 @@
-# Mirage Ansible bootstrap
+# Ansible bootstrap
 
-Этот каталог содержит первый Ansible-этап для свежего VPS. Playbook запускается
-прямо на сервере и применяет настройки к `localhost`.
+Этот playbook готовит свежий VPS к установке Mirage.
 
-## Что делает playbook
+Он создаёт пользователя `mirage`, добавляет SSH-ключ, выдаёт sudo-доступ,
+включает `ufw`, ставит `fail2ban` и может включить SSH-hardening после проверки
+нового входа.
 
-- создаёт бэкап административных файлов в `/root/mirage-backups/`;
-- создаёт пользователя `mirage`;
-- добавляет публичный SSH-ключ;
-- выдаёт `mirage` sudo-доступ для автоматизации;
-- ставит базовые пакеты, `ufw` и `fail2ban`;
-- открывает `22/tcp` и `443/tcp`;
-- включает SSH-hardening только при `enable_ssh_hardening=true`;
-- пишет SSH-hardening в `01-mirage-hardening.conf`.
+## Запуск
 
-## Быстрый запуск
+На свежем VPS под `root`:
 
 ```bash
 apt update
@@ -25,11 +19,10 @@ ansible-playbook --syntax-check site.yml
 ansible-playbook site.yml
 ```
 
-После проверки нового SSH-входа:
+После проверки входа под `mirage`:
 
 ```bash
 ansible-playbook site.yml -e enable_ssh_hardening=true --tags hardening
 ```
 
-Полный порядок:
-[Bootstrap VPS через Ansible](../../docs/runbooks/bootstrap-vps-ansible.md).
+Полный порядок установки описан в [руководстве Mirage](../../docs/guide.md).
