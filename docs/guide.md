@@ -17,7 +17,39 @@ VPN-сервера с админ-панелью, уведомлениями и �
 - Telegram alerts;
 - ежедневные бэкапы базы 3x-ui.
 
-## 1. Подготовь свежий VPS
+## 1. Подготовь SSH-ключ
+
+Если ключ `mirage_ed25519` уже есть, пропусти этот шаг.
+
+PowerShell:
+
+```powershell
+ssh-keygen -t ed25519 -f $HOME\.ssh\mirage_ed25519 -C mirage
+```
+
+Linux или macOS:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/mirage_ed25519 -C mirage
+```
+
+Передай публичный ключ на VPS:
+
+```bash
+ssh root@SERVER_HOST_OR_DOMAIN "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
+scp ~/.ssh/mirage_ed25519.pub root@SERVER_HOST_OR_DOMAIN:/root/.ssh/mirage_ed25519.pub
+```
+
+PowerShell:
+
+```powershell
+ssh root@SERVER_HOST_OR_DOMAIN "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
+scp $HOME\.ssh\mirage_ed25519.pub root@SERVER_HOST_OR_DOMAIN:/root/.ssh/mirage_ed25519.pub
+```
+
+Приватный ключ не копируй на VPS.
+
+## 2. Подготовь свежий VPS
 
 Зайди на сервер под `root`, установи Ansible и Git:
 
@@ -26,10 +58,10 @@ apt update
 apt install -y ansible git
 ```
 
-Клонируй репозиторий:
+Клонируй релизную ветку:
 
 ```bash
-git clone --branch dev https://github.com/duckduckduck1/Mirage.git /root/mirage
+git clone --branch main https://github.com/duckduckduck1/Mirage.git /root/mirage
 cd /root/mirage/infra/ansible
 ```
 
@@ -71,13 +103,14 @@ pubkeyauthentication yes
 443/tcp ALLOW
 ```
 
-## 2. Подготовь рабочую копию
+## 3. Подготовь рабочую копию
 
-Под пользователем `mirage`:
+Под пользователем `mirage` клонируется отдельная рабочая копия. Root-копия из
+`/root/mirage` нужна только для первого bootstrap.
 
 ```bash
 mkdir -p /home/mirage/projects
-git clone --branch dev https://github.com/duckduckduck1/Mirage.git /home/mirage/projects/Mirage
+git clone --branch main https://github.com/duckduckduck1/Mirage.git /home/mirage/projects/Mirage
 cd /home/mirage/projects/Mirage
 ```
 
@@ -85,11 +118,11 @@ cd /home/mirage/projects/Mirage
 
 ```bash
 cd /home/mirage/projects/Mirage
-git switch dev
-git pull --ff-only origin dev
+git switch main
+git pull --ff-only origin main
 ```
 
-## 3. Запусти deploy
+## 4. Запусти deploy
 
 ```bash
 sudo bash ops/vpn/deploy.sh SERVER_HOST_OR_DOMAIN
@@ -113,7 +146,7 @@ Backup directory: /home/mirage/mirage-vpn/backups
 sudo cat /home/mirage/mirage-vpn/access.md
 ```
 
-## 4. Проверь сервер
+## 5. Проверь сервер
 
 На VPS:
 
@@ -135,10 +168,13 @@ Test-NetConnection $Server -Port 8090
 Test-NetConnection $Server -Port $PanelPort
 ```
 
+`PANEL_PORT` возьми из `/home/mirage/mirage-vpn/access.md`, строка
+`Panel port on VPS`.
+
 `443/tcp` должен быть доступен снаружи. `8090` и порт панели 3x-ui должны быть
 закрыты снаружи.
 
-## 5. Открой Mirage Admin
+## 6. Открой Mirage Admin
 
 На локальной машине:
 
@@ -154,12 +190,12 @@ http://127.0.0.1:8090/
 
 Введи `MIRAGE_ADMIN_TOKEN` из `/home/mirage/mirage-vpn/access.md`.
 
-## 6. Открой 3x-ui
+## 7. Открой 3x-ui
 
 Обычно 3x-ui нужен только для ручной проверки низкого уровня. Основные действия
 делай через Mirage Admin.
 
-С Windows:
+На локальной машине из локальной копии репозитория:
 
 ```powershell
 .\ops\xui\open-panel.ps1 -ServerHost SERVER_HOST_OR_DOMAIN
@@ -177,7 +213,7 @@ sudo /usr/local/x-ui/x-ui setting -show true
 sudo /usr/local/x-ui/x-ui
 ```
 
-## 7. Включи Telegram alerts
+## 8. Включи Telegram alerts
 
 1. Создай бота через BotFather.
 2. Открой бота в Telegram и отправь ему любое сообщение.
@@ -224,7 +260,7 @@ curl -fsS -X POST \
   http://127.0.0.1:8090/api/v0/alerts/test
 ```
 
-## 8. Выдай VPN-профиль
+## 9. Выдай VPN-профиль
 
 Базовые профили:
 
@@ -260,7 +296,7 @@ sudo docker compose -f ops/xui/compose.yml run --rm xui-ops ensure-client \
 
 Удалить или отключить профиль можно в Mirage Admin.
 
-## 9. Сделай и сохрани backup
+## 10. Сделай и сохрани backup
 
 Ручной backup:
 
@@ -287,7 +323,7 @@ scp -i $HOME\.ssh\mirage_ed25519 mirage@SERVER_HOST_OR_DOMAIN:/home/mirage/mirag
 Restore временно прерывает VPN. Перед restore Mirage создаёт pre-restore backup,
 останавливает `x-ui`, заменяет базу и запускает сервис обратно.
 
-## 10. Пересоздай VPN inbound
+## 11. Пересоздай VPN inbound
 
 Пересоздавай inbound, если меняешь Reality target/SNI, public host, ключи Reality
 или исправляешь ошибочную ручную настройку.
@@ -310,7 +346,7 @@ sudo docker compose -f ops/xui/compose.yml run --rm xui-ops bootstrap-vpn \
 
 После reset выдай свежие ссылки и удали старые профили из клиентских приложений.
 
-## 11. Миграция на новый VPS
+## 12. Миграция на новый VPS
 
 1. Подними свежий VPS.
 2. Выполни bootstrap.
