@@ -12,6 +12,8 @@ Xray/3x-ui, настраивает VLESS Reality на `443/tcp`, создаёт 
 - безопасный bootstrap VPS через Ansible;
 - установка Docker, 3x-ui/Xray и Mirage Admin одной командой;
 - VLESS Reality на `443/tcp`;
+- фиксированная версия Xray, совместимая с sing-box/Hiddify;
+- авто-освобождение портов `80/443` от чужого веб-сервера (nginx хостера);
 - профили `main`, `partner`, `shared` и возможность создавать новые имена;
 - Mirage Admin на `127.0.0.1:8090`;
 - панель 3x-ui только через SSH-туннель;
@@ -185,6 +187,19 @@ Test-NetConnection $Server -Port $PanelPort
 - `8090` снаружи закрыт;
 - порт панели 3x-ui снаружи закрыт;
 - Mirage Admin и 3x-ui открываются только через SSH-туннель.
+
+## Диагностика
+
+Частые проблемы при подключении (подробно — в [руководстве](docs/guide.md#диагностика)):
+
+- **Клиент виснет на `timeout`, хотя `443/tcp` открыт.** Порт 443 занял чужой
+  сервис (обычно предустановленный nginx хостера) — Xray не поднялся. `deploy.sh`
+  теперь сам гасит такие сервисы; вручную: `sudo systemctl disable --now nginx && sudo systemctl restart x-ui`.
+- **Hiddify пишет `timeout` / `reality verification failed`, а v2rayN/v2rayNG
+  работают.** Несовместимость версий REALITY: установщик 3x-ui тянет самый свежий
+  Xray, а ядро Hiddify (sing-box) его вариант не поддерживает. Решение —
+  зафиксировать совместимую версию: `deploy.sh` пинит её по умолчанию
+  (`MIRAGE_XRAY_VERSION`, сейчас `v25.12.8`).
 
 ## Документация
 

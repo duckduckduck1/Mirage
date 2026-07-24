@@ -338,6 +338,8 @@ sudo docker compose -f ops/xui/compose.yml run --rm xui-ops vpn-diagnose
 
 ### VPN-клиент зависает на timeout
 
+Сначала общий осмотр:
+
 ```bash
 sudo ss -tlnp | grep ':443'
 sudo ufw status numbered
@@ -345,7 +347,52 @@ systemctl status x-ui --no-pager
 sudo journalctl -u x-ui -n 100 --no-pager
 ```
 
-Проверь, что `443/tcp` слушает Xray и открыт в `ufw`.
+Ожидаемо: `443/tcp` слушает именно `xray`, порт открыт в `ufw`. Дальше две
+частые причины.
+
+#### Причина 1. Порт 443 занял чужой сервис (обычно nginx хостера)
+
+Многие образы VPS идут с предустановленным nginx на `80/443`. Тогда Xray не может
+занять порт и крешится в цикле, а на 443 отвечает nginx: TCP-подключение
+проходит, но Reality-хендшейка нет — клиент виснет на timeout.
+
+```bash
+sudo ss -tlnp | grep ':443'                                  # должен быть xray, не nginx
+sudo journalctl -u x-ui -n 50 --no-pager | grep -i 'address already in use'
+```
+
+Починка:
+
+```bash
+sudo systemctl disable --now nginx
+sudo systemctl restart x-ui
+```
+
+`deploy.sh` делает это автоматически (гасит nginx/apache/caddy и т.п.). Отключить
+авто-освобождение можно через `MIRAGE_FREE_WEB_PORTS=false`.
+
+#### Причина 2. Hiddify пишет timeout / `reality verification failed`
+
+Симптом: клиенты на xray-core (v2rayN, v2rayNG) подключаются, а Hiddify — нет; в
+логах ядра Hiddify — `reality verification failed`. Причина — несовместимость
+версий REALITY: установщик 3x-ui ставит самый свежий Xray, а ядро Hiddify
+(sing-box) может не поддерживать его вариант REALITY-хендшейка.
+
+Проверить версию Xray на сервере:
+
+```bash
+( cd /usr/local/x-ui/bin && LD_LIBRARY_PATH=. ./xray-linux-amd64 version | head -1 )
+```
+
+Починка — зафиксировать совместимую версию (по умолчанию `deploy.sh` это делает):
+
+```bash
+cd /home/mirage/projects/Mirage
+sudo MIRAGE_XRAY_VERSION=v25.12.8 bash ops/vpn/deploy.sh SERVER_HOST_OR_DOMAIN
+```
+
+Ключи, ссылки и конфиг при смене версии ядра не меняются — обновляется только
+бинарник Xray. Не поднимай версию до заведомо новых сборок без проверки в Hiddify.
 
 ### Mirage Admin не открывается
 
