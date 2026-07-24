@@ -16,6 +16,14 @@ DEFAULT_REALITY_TARGET="www.amazon.com:443"
 DEFAULT_REALITY_SNI="www.amazon.com"
 DEFAULT_CLIENTS="main partner shared"
 DEFAULT_ADMIN_PORT="8090"
+# Pinned Xray-core version. 3x-ui's installer pulls the LATEST Xray, whose Reality
+# handshake can be too new for common clients (sing-box / Hiddify -> "reality
+# verification failed" / timeout). Pin a version verified against sing-box.
+# Override with MIRAGE_XRAY_VERSION=vX.Y.Z, or MIRAGE_XRAY_VERSION=latest to skip.
+DEFAULT_XRAY_VERSION="v25.12.8"
+# Web servers that would grab 80/443 and block Xray Reality (common on fresh VPS
+# images that ship a default nginx). Freed automatically unless MIRAGE_FREE_WEB_PORTS=false.
+CONFLICTING_WEB_SERVICES="nginx apache2 httpd caddy lighttpd"
 
 log() {
   printf '\n[%s] %s\n' "$(date +%H:%M:%S)" "$*"
@@ -125,7 +133,7 @@ install_packages() {
   log "Installing base packages"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install -y ca-certificates curl jq nodejs openssl python3 ufw docker.io
+  apt-get install -y ca-certificates curl jq nodejs openssl python3 unzip ufw docker.io
 
   if ! docker compose version >/dev/null 2>&1; then
     apt-get install -y docker-compose-v2 || apt-get install -y docker-compose-plugin
@@ -149,6 +157,31 @@ configure_firewall() {
 cleanup_proxy_containers() {
   log "Removing old proxy containers if present"
   docker rm -f mirage-mtproxy mirage-tg-ws-proxy >/dev/null 2>&1 || true
+}
+
+ensure_ports_available() {
+  log "Ensuring ports 80/443 are free for Xray Reality"
+  local svc
+  for svc in $CONFLICTING_WEB_SERVICES; do
+    if systemctl is-active --quiet "$svc" 2>/dev/null; then
+      if [[ "${MIRAGE_FREE_WEB_PORTS:-true}" == "true" ]]; then
+        log "Disabling conflicting web server that occupies 80/443: $svc"
+        systemctl disable --now "$svc" >/dev/null 2>&1 || true
+      else
+        die "$svc occupies port 443 and blocks Xray. Run 'sudo systemctl disable --now $svc' or set MIRAGE_FREE_WEB_PORTS=true, then re-run deploy."
+      fi
+    fi
+  done
+
+  # Any :443 listener that is NOT our own Xray/x-ui is a foreign conflict.
+  # (On a re-run Xray is already bound to 443 — that must not abort the deploy.)
+  local foreign
+  foreign="$(ss -tlnp 2>/dev/null | awk '$4 ~ /:443$/' | grep -vE 'users:\(\("(xray|x-ui)' || true)"
+  if [[ -n "$foreign" ]]; then
+    log "Port 443 is held by a non-Xray process:"
+    printf '%s\n' "$foreign" >&2
+    die "free port 443 before deploying (a process other than Xray is listening on it)."
+  fi
 }
 
 install_xui_if_needed() {
@@ -207,6 +240,71 @@ configure_xui_local_panel() {
   systemctl enable --now x-ui
   systemctl restart x-ui
   sleep 3
+}
+
+xray_running_version() {
+  local bin="$1"
+  [[ -x "$bin" ]] || return 0
+  ( cd "$(dirname "$bin")" && LD_LIBRARY_PATH=. "./$(basename "$bin")" version 2>/dev/null ) \
+    | awk 'NR==1 {print "v"$2; exit}'
+}
+
+pin_xray_version() {
+  local desired="${MIRAGE_XRAY_VERSION:-$DEFAULT_XRAY_VERSION}"
+  if [[ "$desired" == "latest" || -z "$desired" ]]; then
+    log "Xray version not pinned (MIRAGE_XRAY_VERSION=latest)"
+    return
+  fi
+
+  local asset target
+  case "$(uname -m)" in
+    x86_64|amd64)   asset="Xray-linux-64.zip";        target="xray-linux-amd64" ;;
+    aarch64|arm64)  asset="Xray-linux-arm64-v8a.zip"; target="xray-linux-arm64" ;;
+    *) log "Unknown arch $(uname -m); leaving Xray version as installed"; return ;;
+  esac
+
+  local bin_dir="/usr/local/x-ui/bin"
+  local bin_path="$bin_dir/$target"
+  local current
+  current="$(xray_running_version "$bin_path")"
+  if [[ "$current" == "$desired" ]]; then
+    log "Xray already pinned at $desired"
+    return
+  fi
+
+  log "Pinning Xray core: ${current:-unknown} -> $desired (sing-box/Hiddify Reality compatibility)"
+  local tmp
+  tmp="$(mktemp -d)"
+  local url="https://github.com/XTLS/Xray-core/releases/download/${desired}/${asset}"
+  if ! curl -fsSL "$url" -o "$tmp/xray.zip"; then
+    rm -rf "$tmp"
+    die "failed to download Xray $desired ($url). Set MIRAGE_XRAY_VERSION to a valid tag or 'latest'."
+  fi
+  if have unzip; then
+    unzip -o "$tmp/xray.zip" xray -d "$tmp" >/dev/null
+  else
+    python3 -c "import zipfile; zipfile.ZipFile('$tmp/xray.zip').extract('xray', '$tmp')"
+  fi
+  [[ -f "$tmp/xray" ]] || { rm -rf "$tmp"; die "Xray binary not found inside $asset"; }
+
+  # Keep a one-time backup of the installer-provided binary.
+  [[ -f "$bin_path.orig" ]] || cp -n "$bin_path" "$bin_path.orig" 2>/dev/null || true
+
+  systemctl stop x-ui
+  if ! cp "$tmp/xray" "$bin_path"; then
+    systemctl start x-ui || true
+    rm -rf "$tmp"
+    die "failed to replace Xray binary at $bin_path"
+  fi
+  chmod 755 "$bin_path"
+  rm -rf "$tmp"
+  systemctl start x-ui
+  sleep 3
+
+  local now
+  now="$(xray_running_version "$bin_path")"
+  [[ "$now" == "$desired" ]] || die "Xray pin failed: running ${now:-unknown}, wanted $desired"
+  log "Xray pinned at $now"
 }
 
 write_xui_env() {
@@ -579,12 +677,14 @@ main() {
   log "Deploying Mirage VPN for host: $PUBLIC_HOST"
   log "Access bundle: $OUTPUT_DIR"
 
+  ensure_ports_available
   install_packages
   cleanup_proxy_containers
   configure_firewall
   install_xui_if_needed
   load_xui_result
   configure_xui_local_panel
+  pin_xray_version
   write_xui_env
   build_xui_ops
   ensure_api_token
