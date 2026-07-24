@@ -1,30 +1,74 @@
 # Mirage
 
-Mirage превращает свежий VPS в управляемый VPN-сервер. Проект поднимает
-Xray/3x-ui, настраивает VLESS Reality на `443/tcp`, создаёт профили доступа,
-запускает локальную админ-панель и включает бэкапы.
+[![standard-readme compliant](https://img.shields.io/badge/readme%20style-standard-brightgreen.svg?style=flat-square)](https://github.com/RichardLitt/standard-readme)
+[![Лицензия: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 
-Сервер можно заменить быстро: конфигурация, профили, бэкапы и команды
-развёртывания живут в одном репозитории, а рабочие секреты остаются вне git.
+Разворачивает управляемый VPN-сервер (VLESS Reality) на свежем VPS одной командой.
 
-## Что входит в v0.1
+Mirage превращает чистый VPS в управляемый VPN-сервер: поднимает Xray/3x-ui с
+VLESS Reality на `443/tcp`, создаёт профили доступа, локальную админ-панель и
+бэкапы. Конфигурация, профили и команды развёртывания живут в одном
+репозитории, а рабочие секреты остаются вне git — поэтому сервер можно быстро
+пересоздать на новом VPS.
+
+## Содержание
+
+- [Безопасность](#безопасность)
+- [О проекте](#о-проекте)
+- [Установка](#установка)
+- [Эксплуатация](#эксплуатация)
+- [Диагностика](#диагностика)
+- [Документация](#документация)
+- [Структура репозитория](#структура-репозитория)
+- [Вклад](#вклад)
+- [Лицензия](#лицензия)
+
+## Безопасность
+
+Mirage управляет VPN-сервером и его секретами, поэтому обращайся с репозиторием и
+файлом доступа аккуратно.
+
+- Панель 3x-ui и Mirage Admin **не открываются наружу** — только через SSH-туннель.
+- `access.md` содержит токены, пароли и параметры доступа. Это секретный файл: не
+  отправляй его в чат, issue или pull request и не добавляй в git.
+
+Никогда не коммить в git:
+
+- `.env.local`, `users.local.json`, backup-файлы и дампы базы;
+- `access.md`, клиентские и subscription-ссылки;
+- UUID, Reality private key, short ID;
+- пароль панели, API-токен, `WEB_BASE_PATH`;
+- реальные IP и домены, раскрывающие рабочую инфраструктуру.
+
+Храни секреты и бэкапы в менеджере паролей или другом защищённом хранилище.
+
+## О проекте
+
+Mirage поднимает VLESS Reality — протокол, который маскирует VPN-трафик под
+обычный TLS к популярному сайту (по умолчанию `www.amazon.com`), что затрудняет
+блокировку. Стек разворачивается на свежем VPS с Ubuntu 24.04 и управляется из
+одного репозитория, поэтому миграция на новый сервер занимает минуты.
+
+Возможности:
 
 - безопасный bootstrap VPS через Ansible;
 - установка Docker, 3x-ui/Xray и Mirage Admin одной командой;
 - VLESS Reality на `443/tcp`;
 - фиксированная версия Xray, совместимая с sing-box/Hiddify;
 - авто-освобождение портов `80/443` от чужого веб-сервера (nginx хостера);
-- профили `main`, `partner`, `shared` и возможность создавать новые имена;
-- Mirage Admin на `127.0.0.1:8090`;
-- панель 3x-ui только через SSH-туннель;
-- Telegram alerts;
-- автоматические и ручные бэкапы базы 3x-ui;
-- импорт, скачивание и восстановление бэкапа.
+- профили `main`, `partner`, `shared` и возможность создавать новые;
+- Mirage Admin на `127.0.0.1:8090`, панель 3x-ui — только через SSH-туннель;
+- Telegram-алерты;
+- автоматические и ручные бэкапы базы 3x-ui, импорт и восстановление.
 
-## Быстрый старт
+Как устроен стек — в [docs/architecture.md](docs/architecture.md).
 
-Полный путь описан в [руководстве](docs/guide.md). Ниже короткая версия для уже
-подготовленного VPS.
+## Установка
+
+Нужен свежий VPS на Ubuntu 24.04 и SSH-доступ. Полный путь, включая первичный
+bootstrap через Ansible, описан в [руководстве](docs/guide.md).
+
+Короткая версия для уже подготовленного VPS:
 
 ```bash
 cd /home/mirage/projects/Mirage
@@ -33,204 +77,86 @@ git pull --ff-only origin dev
 sudo bash ops/vpn/deploy.sh SERVER_HOST_OR_DOMAIN
 ```
 
-В конце deploy покажет основные пути:
-
-```text
-Access file: /home/mirage/mirage-vpn/access.md
-Links directory: /home/mirage/mirage-vpn/links
-Backup directory: /home/mirage/mirage-vpn/backups
-```
-
-Сразу сохрани файл доступа:
+В конце deploy напечатает основные пути. Сразу сохрани файл доступа:
 
 ```bash
 sudo cat /home/mirage/mirage-vpn/access.md
 ```
 
-`access.md` содержит token Mirage Admin, команды SSH-туннелей, параметры 3x-ui и
-пути к профилям. Это секретный файл. Не отправляй его в чат, issue, pull request
-и не добавляй в git.
-
-## Первые настройки
-
-### Открой Mirage Admin
-
-На локальной машине:
-
-```powershell
-ssh -i $HOME\.ssh\mirage_ed25519 -N -L 8090:127.0.0.1:8090 mirage@SERVER_HOST_OR_DOMAIN
-```
-
-Открой в браузере:
-
-```text
-http://127.0.0.1:8090/
-```
-
-Token возьми из `/home/mirage/mirage-vpn/access.md`.
-
-### Включи Telegram alerts
-
-Создай бота через BotFather, открой его в Telegram и отправь боту любое
-сообщение. Token не публикуй.
-
-На VPS:
-
-```bash
-read -r -s -p "BOT_TOKEN: " TG_BOT_TOKEN; echo
-TG_BOT_TOKEN="$(printf '%s' "$TG_BOT_TOKEN" | tr -d '\r\n ')"
-
-curl -fsS "https://api.telegram.org/bot${TG_BOT_TOKEN}/getUpdates" \
-  | jq -r '.result[-1].message.chat.id // empty'
-```
-
-Если команда ничего не вывела, отправь боту ещё одно сообщение и повтори её.
-
-Открой настройки:
-
-```bash
-cd /home/mirage/projects/Mirage
-sudoedit ops/admin/.env.local
-```
-
-Задай значения:
-
-```env
-MIRAGE_ALERTS_ENABLED=true
-MIRAGE_ALERT_TELEGRAM_BOT_TOKEN=PASTE_BOT_TOKEN
-MIRAGE_ALERT_TELEGRAM_CHAT_ID=PASTE_CHAT_ID
-```
-
-Перезапусти админку и отправь тест:
-
-```bash
-sudo docker compose --env-file ops/admin/.env.local -f ops/admin/compose.yml up -d --build
-
-MIRAGE_ADMIN_TOKEN="$(
-  sudo awk -F= '/^MIRAGE_ADMIN_TOKEN=/ {print $2; exit}' ops/admin/.env.local
-)"
-
-curl -fsS -X POST \
-  -H "Authorization: Bearer $MIRAGE_ADMIN_TOKEN" \
-  http://127.0.0.1:8090/api/v0/alerts/test
-```
-
-### Получи VPN-профили
-
-Готовые профили лежат на VPS:
-
-```text
-/home/mirage/mirage-vpn/links/main.profile.txt
-/home/mirage/mirage-vpn/links/partner.profile.txt
-/home/mirage/mirage-vpn/links/shared.profile.txt
-```
-
-Вывести профиль заново:
-
-```bash
-cd /home/mirage/projects/Mirage
-sudo docker compose -f ops/xui/compose.yml run --rm xui-ops subscriptions --email main
-```
-
-Создать новый профиль:
-
-```bash
-sudo docker compose -f ops/xui/compose.yml run --rm xui-ops ensure-client \
-  --email CLIENT_NAME \
-  --print-links
-```
-
-Используй технические имена: `phone`, `tablet`, `friend-a`. Не используй ФИО,
-телефоны и другие личные данные.
-
-### Проверь бэкапы
-
-```bash
-systemctl status mirage-xui-backup.timer --no-pager
-sudo /usr/local/bin/mirage-xui-backup
-ls -lah /home/mirage/mirage-vpn/backups
-```
-
-Скачать конкретный файл на локальную машину:
-
-```powershell
-scp -i $HOME\.ssh\mirage_ed25519 mirage@SERVER_HOST_OR_DOMAIN:/home/mirage/mirage-vpn/backups/BACKUP_FILE.db .
-```
-
-Скачивать, импортировать и восстанавливать бэкапы удобнее через Mirage Admin.
-Перед восстановлением или пересозданием VPN inbound всегда делай свежий бэкап.
-
-## Проверка
-
-На VPS:
+Проверь, что сервер поднялся:
 
 ```bash
 sudo -E bash ops/release/check-local.sh
-sudo ss -tlnp | grep -E ':443|127.0.0.1:8090'
+sudo ss -tlnp | grep ':443'      # на 443 должен слушать xray
 sudo ufw status numbered
 ```
 
-С локальной машины:
+Ожидаемо: `443/tcp` открыт снаружи, а порты панели 3x-ui и Mirage Admin закрыты —
+они доступны только через SSH-туннель.
 
-```powershell
-$Server = "SERVER_HOST_OR_DOMAIN"
-$PanelPort = PANEL_PORT
+## Эксплуатация
 
-Test-NetConnection $Server -Port 443
-Test-NetConnection $Server -Port 8090
-Test-NetConnection $Server -Port $PanelPort
-```
+Все процедуры с командами — в [руководстве](docs/guide.md). Коротко:
 
-Ожидаемо:
+- **VPN-профили** лежат на VPS в `/home/mirage/mirage-vpn/links/`. Выдать новый:
 
-- `443/tcp` доступен снаружи;
-- `8090` снаружи закрыт;
-- порт панели 3x-ui снаружи закрыт;
-- Mirage Admin и 3x-ui открываются только через SSH-туннель.
+  ```bash
+  sudo docker compose -f ops/xui/compose.yml run --rm xui-ops \
+    ensure-client --email CLIENT_NAME --print-links
+  ```
+
+  Используй технические имена (`phone`, `tablet`, `friend-a`), не личные данные.
+- **Mirage Admin** — токены, alerts и восстановление бэкапов; открывается через
+  SSH-туннель на `127.0.0.1:8090`
+  ([как открыть](docs/guide.md#5-открой-mirage-admin)).
+- **Бэкапы** базы 3x-ui идут по таймеру и вручную:
+
+  ```bash
+  sudo /usr/local/bin/mirage-xui-backup
+  ```
+
+- **Telegram-алерты** включаются в `ops/admin/.env.local`
+  ([инструкция](docs/guide.md#7-включи-telegram-alerts)).
 
 ## Диагностика
 
-Частые проблемы при подключении (подробно — в [руководстве](docs/guide.md#диагностика)):
+Частые проблемы при подключении (подробно — в
+[руководстве](docs/guide.md#диагностика)):
 
 - **Клиент виснет на `timeout`, хотя `443/tcp` открыт.** Порт 443 занял чужой
   сервис (обычно предустановленный nginx хостера) — Xray не поднялся. `deploy.sh`
-  теперь сам гасит такие сервисы; вручную: `sudo systemctl disable --now nginx && sudo systemctl restart x-ui`.
+  сам гасит такие сервисы; вручную:
+  `sudo systemctl disable --now nginx && sudo systemctl restart x-ui`.
 - **Hiddify пишет `timeout` / `reality verification failed`, а v2rayN/v2rayNG
   работают.** Несовместимость версий REALITY: установщик 3x-ui тянет самый свежий
-  Xray, а ядро Hiddify (sing-box) его вариант не поддерживает. Решение —
-  зафиксировать совместимую версию: `deploy.sh` пинит её по умолчанию
-  (`MIRAGE_XRAY_VERSION`, сейчас `v25.12.8`).
+  Xray, а ядро Hiddify (sing-box) его вариант не поддерживает. `deploy.sh` пинит
+  совместимую версию (`MIRAGE_XRAY_VERSION`, сейчас `v25.12.8`).
 
 ## Документация
 
-- [Руководство](docs/guide.md) - установка, настройка, обслуживание и
-  восстановление.
-- [Архитектура](docs/architecture.md) - как устроен стек.
-- [Mirage Admin](ops/admin/README.md) - технический справочник панели и API.
-- [xui-ops](ops/xui/README.md) - технический справочник CLI.
+- [Руководство](docs/guide.md) — установка, настройка, обслуживание и восстановление.
+- [Архитектура](docs/architecture.md) — как устроен стек.
+- [Mirage Admin](ops/admin/README.md) — справочник панели и API.
+- [xui-ops](ops/xui/README.md) — справочник CLI управления 3x-ui.
 
-## Безопасность
-
-Не добавляй в git:
-
-- `.env.local`, `users.local.json`, backup-файлы и дампы базы;
-- `access.md`, клиентские ссылки и subscription-ссылки;
-- UUID, Reality private key, short IDs;
-- пароль панели, API token, `WEB_BASE_PATH`;
-- реальные IP и домены, если они раскрывают рабочую инфраструктуру.
-
-Храни секреты и бэкапы в менеджере паролей или другом защищённом хранилище.
-
-## Структура
+## Структура репозитория
 
 | Путь | Назначение |
 |---|---|
 | `ops/vpn` | однокомандный deploy |
 | `ops/admin` | локальная админ-панель, alerts и бэкапы |
 | `ops/xui` | управление 3x-ui через API |
-| `infra/ansible` | первый bootstrap VPS |
+| `infra/ansible` | первичный bootstrap VPS |
 | `docs` | руководство и архитектура |
+
+## Вклад
+
+Баги и предложения — через issues. Правила по веткам, коммитам и pull request'ам
+описаны в [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Pull request'ы приветствуются. Не добавляй в коммиты секреты и реальные параметры
+инфраструктуры (см. [Безопасность](#безопасность)).
 
 ## Лицензия
 
-[MIT](LICENSE).
+[MIT](LICENSE) © Richard.
