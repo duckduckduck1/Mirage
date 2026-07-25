@@ -132,6 +132,17 @@ Deploy устанавливает системные пакеты, Docker, 3x-ui
 backup timer и restore helper. Также он создаёт VLESS Reality inbound и базовые
 профили.
 
+> **Одной командой.** На свежем VPS шаги 2–4 (bootstrap + deploy) можно выполнить
+> сразу под root:
+>
+> ```bash
+> sudo bash ops/up.sh SERVER_HOST_OR_DOMAIN
+> ```
+>
+> Флаги: `--with-hardening` (SSH-hardening после самопроверки входа по ключу),
+> `--app-only` (только слой deploy, идемпотентно и безопасно на уже поднятом
+> сервере), `--dry-run` (предпросмотр без изменений).
+
 Финальный вывод содержит:
 
 ```text
@@ -348,16 +359,39 @@ sudo docker compose -f ops/xui/compose.yml run --rm xui-ops bootstrap-vpn \
 
 ## 12. Миграция на новый VPS
 
-1. Подними свежий VPS.
-2. Выполни bootstrap.
-3. Разверни Mirage через `ops/vpn/deploy.sh`.
-4. Открой Mirage Admin.
-5. Импортируй актуальный backup.
-6. Выполни restore.
-7. Проверь `443/tcp`, профили и VPN-клиенты.
-8. Выдай пользователям свежие ссылки, если public host изменился.
+Если IP забанили или нужно переехать — весь стек и профили со старого сервера
+поднимаются на новом **одной командой** из бэкапа.
+
+1. Возьми свежий backup со старого VPS (если он ещё доступен) и скачай его:
+
+   ```bash
+   ssh mirage@OLD_HOST 'sudo /usr/local/bin/mirage-xui-backup'
+   scp -i ~/.ssh/mirage_ed25519 \
+     mirage@OLD_HOST:/home/mirage/mirage-vpn/backups/x-ui-*.db .
+   ```
+
+2. Подними свежий VPS (root + твой SSH-ключ), склонируй репозиторий, залей на него
+   backup — и одна команда:
+
+   ```bash
+   sudo bash ops/up.sh NEW_HOST_OR_DOMAIN --restore /path/to/x-ui-backup.db
+   ```
+
+   `up.sh` выполнит bootstrap, развернёт стек и восстановит базу 3x-ui из бэкапа:
+   старые Reality-ключи, UUID, профили и подписки сохранятся. Ссылки и `access.md`
+   перегенерируются под новый host.
+
+3. Проверь `443/tcp`, профили и подключение VPN-клиента.
+4. Раздай пользователям обновлённые ссылки — ключи те же, изменился только адрес
+   сервера.
 
 IP считается заменяемым. Важны бэкапы, SSH-ключи и сохранённый `access.md`.
+
+> Восстановить базу из бэкапа на уже поднятом сервере можно и отдельно:
+>
+> ```bash
+> sudo bash ops/admin/mirage-restore.sh /path/to/x-ui-backup.db
+> ```
 
 ## Диагностика
 

@@ -396,7 +396,12 @@ EOF
 
 start_admin_api() {
   log "Starting Mirage Admin API"
-  docker compose --env-file "$ADMIN_ENV_FILE" -f "$ADMIN_COMPOSE_FILE" up -d --build
+  # mirage-admin and mirage-alerts share one image (mirage-admin:local). Building
+  # both together lets BuildKit export the same tag twice in parallel and race
+  # ("image already exists"). Build the shared image once, then start without a
+  # parallel rebuild.
+  docker compose --env-file "$ADMIN_ENV_FILE" -f "$ADMIN_COMPOSE_FILE" build mirage-admin
+  docker compose --env-file "$ADMIN_ENV_FILE" -f "$ADMIN_COMPOSE_FILE" up -d
   local admin_port
   admin_port="${MIRAGE_ADMIN_PORT:-$DEFAULT_ADMIN_PORT}"
   for _ in $(seq 1 20); do
@@ -471,7 +476,10 @@ if [ -f "$ADMIN_ENV_FILE" ]; then
   set +a
 fi
 mkdir -p "$BACKUP_DIR"
-docker compose -f "$XUI_COMPOSE_FILE" run --rm xui-ops backup-db --output "$BACKUP_DIR/x-ui-\$(date +%Y%m%d-%H%M%S).db"
+# The xui-ops container only mounts ../../backups; the host backup dir is not in
+# it. Mount it explicitly and write there, otherwise the backup lands in the
+# container's ephemeral filesystem and is lost with --rm.
+docker compose -f "$XUI_COMPOSE_FILE" run --rm -v "$BACKUP_DIR:/backups" xui-ops backup-db --output "/backups/x-ui-\$(date +%Y%m%d-%H%M%S).db"
 retention_days="\${MIRAGE_ADMIN_BACKUP_RETENTION_DAYS:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_BACKUP_RETENTION_DAYS || printf '14')}"
 keep_min="\${MIRAGE_ADMIN_BACKUP_KEEP_MIN:-$(env_file_value "$ADMIN_ENV_FILE" MIRAGE_ADMIN_BACKUP_KEEP_MIN || printf '3')}"
 python3 - "$BACKUP_DIR" "\$retention_days" "\$keep_min" <<'PY'

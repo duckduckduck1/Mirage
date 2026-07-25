@@ -72,10 +72,15 @@ bootstrap через Ansible, описан в [руководстве](docs/guid
 
 ```bash
 cd /home/mirage/projects/Mirage
-git switch dev
-git pull --ff-only origin dev
+git switch main
+git pull --ff-only origin main
 sudo bash ops/vpn/deploy.sh SERVER_HOST_OR_DOMAIN
 ```
+
+> **Одной командой.** На свежем VPS весь стек (bootstrap + deploy) поднимается
+> под root: `sudo bash ops/up.sh SERVER_HOST_OR_DOMAIN`. Переезд со старого VPS из
+> бэкапа: `sudo bash ops/up.sh NEW_HOST --restore x-ui-backup.db` — старые ключи,
+> профили и ссылки сохраняются. Подробности — в [руководстве](docs/guide.md).
 
 В конце deploy напечатает основные пути. Сразу сохрани файл доступа:
 
