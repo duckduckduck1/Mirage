@@ -243,10 +243,13 @@ configure_xui_local_panel() {
 }
 
 xray_running_version() {
-  local bin="$1"
+  local bin="$1" out
   [[ -x "$bin" ]] || return 0
-  ( cd "$(dirname "$bin")" && LD_LIBRARY_PATH=. "./$(basename "$bin")" version 2>/dev/null ) \
-    | awk 'NR==1 {print "v"$2; exit}'
+  # Capture first, then parse. Piping `xray version` straight into `awk ... exit`
+  # closes the pipe after line 1 while xray is still writing, so xray gets SIGPIPE
+  # and, under `set -o pipefail`, the whole deploy dies with code 141.
+  out="$( cd "$(dirname "$bin")" && LD_LIBRARY_PATH=. "./$(basename "$bin")" version 2>/dev/null )" || true
+  printf '%s\n' "$out" | awk 'NR==1 {print "v"$2}'
 }
 
 pin_xray_version() {
