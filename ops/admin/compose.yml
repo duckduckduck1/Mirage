@@ -5,8 +5,14 @@ services:
       dockerfile: ops/admin/Dockerfile
     image: mirage-admin:local
     container_name: mirage-admin
+    # Host networking so the app can reach 3x-ui on 127.0.0.1:<panel> and bind the
+    # admin API on 127.0.0.1 only (never exposed externally). See docs/architecture.md.
     network_mode: host
     user: "${MIRAGE_ADMIN_UID:-10001}:${MIRAGE_ADMIN_GID:-10001}"
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 200m
+    pids_limit: 256
     restart: unless-stopped
     env_file:
       - ../xui/.env.local
@@ -28,6 +34,10 @@ services:
     container_name: mirage-alerts
     network_mode: host
     user: "${MIRAGE_ADMIN_UID:-10001}:${MIRAGE_ADMIN_GID:-10001}"
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    pids_limit: 128
     restart: unless-stopped
     command: ["monitor"]
     env_file:
