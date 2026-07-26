@@ -37,3 +37,8 @@ duckdns_token_file: /etc/mirage/secrets/duckdns_token
 marzban_install_enabled: false
 marzban_version: v0.8.4
 marzban_acceptance_prompt: true
+
+# Версия совпадает со штатным ядром Marzban v0.8.4 и меняется только после
+# полной проверки матрицы клиентов.
+xray_pin_enabled: false
+xray_version: v24.12.31

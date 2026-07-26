@@ -1,0 +1,242 @@
+---
+- name: Validate pinned Xray settings
+  ansible.builtin.assert:
+    that:
+      - ansible_architecture == "x86_64"
+      - xray_version == "v24.12.31"
+      - xray_archive_name == "Xray-linux-64.zip"
+      - xray_install_dir == "/var/lib/marzban/xray-core"
+      - xray_executable_path == "/var/lib/marzban/xray-core/xray"
+      - xray_archive_sha256 is match('^[0-9a-f]{64}$')
+      - xray_executable_sha256 is match('^[0-9a-f]{64}$')
+      - >-
+        xray_download_url ==
+        "https://github.com/XTLS/Xray-core/releases/download/" ~
+        xray_version ~ "/" ~ xray_archive_name
+    fail_msg: >-
+      Use the documented Marzban Xray path and the reviewed amd64 release.
+
+- name: Inspect Marzban application files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ xray_marzban_environment_file }}"
+    - "{{ xray_marzban_compose_file }}"
+  register: xray_marzban_file_stats
+
+- name: Require an existing documented Marzban installation
+  ansible.builtin.assert:
+    that:
+      - xray_marzban_file_stats.results | length == 2
+      - xray_marzban_file_stats.results[0].stat.isreg | default(false)
+      - xray_marzban_file_stats.results[1].stat.isreg | default(false)
+    fail_msg: >-
+      Install and accept the Marzban panel before pinning its Xray core.
+
+- name: Install documented Xray archive tools
+  ansible.builtin.apt:
+    name:
+      - unzip
+      - wget
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the documented Xray directory
+  ansible.builtin.file:
+    path: "{{ xray_install_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Inspect an existing pinned Xray executable
+  ansible.builtin.stat:
+    path: "{{ xray_executable_path }}"
+    checksum_algorithm: sha256
+  register: xray_executable_stat
+
+- name: Read an existing pinned Xray version
+  ansible.builtin.command:
+    argv:
+      - "{{ xray_executable_path }}"
+      - version
+  register: xray_existing_version
+  changed_when: false
+  failed_when: false
+  when: xray_executable_stat.stat.exists
+
+- name: Determine whether the pinned Xray release must be installed
+  ansible.builtin.set_fact:
+    xray_install_required: >-
+      {{
+        (not xray_executable_stat.stat.exists) or
+        (
+          xray_executable_stat.stat.checksum | default("") !=
+          xray_executable_sha256
+        ) or
+        (xray_existing_version.rc | default(1) != 0) or
+        (
+          xray_existing_version.stdout_lines | default([]) | first | default("")
+          is not match("^Xray " ~ xray_version_number ~ " ")
+        )
+      }}
+
+- name: Install the reviewed Xray release
+  when: xray_install_required | bool
+  block:
+    - name: Download Xray with its reviewed SHA-256
+      ansible.builtin.get_url:
+        url: "{{ xray_download_url }}"
+        dest: "{{ xray_archive_path }}"
+        owner: root
+        group: root
+        mode: "0600"
+        checksum: "sha256:{{ xray_archive_sha256 }}"
+        force: true
+
+    - name: Extract Xray into the documented directory
+      ansible.builtin.unarchive:
+        src: "{{ xray_archive_path }}"
+        dest: "{{ xray_install_dir }}"
+        owner: root
+        group: root
+        remote_src: true
+
+  always:
+    - name: Remove the downloaded Xray archive
+      ansible.builtin.file:
+        path: "{{ xray_archive_path }}"
+        state: absent
+
+- name: Set pinned Xray executable permissions
+  ansible.builtin.file:
+    path: "{{ xray_executable_path }}"
+    state: file
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Verify the pinned Xray executable checksum
+  ansible.builtin.stat:
+    path: "{{ xray_executable_path }}"
+    checksum_algorithm: sha256
+  register: xray_pinned_executable_stat
+
+- name: Configure documented XRAY_EXECUTABLE_PATH
+  ansible.builtin.lineinfile:
+    path: "{{ xray_marzban_environment_file }}"
+    regexp: '^#?[ \t]*XRAY_EXECUTABLE_PATH[ \t]*=.*$'
+    line: 'XRAY_EXECUTABLE_PATH = "{{ xray_executable_path }}"'
+    owner: root
+    group: root
+    mode: "0600"
+  register: xray_executable_setting
+  no_log: true
+
+- name: Restart Marzban with the pinned Xray core
+  ansible.builtin.command:
+    argv:
+      - marzban
+      - restart
+      - --no-logs
+  when: xray_install_required | bool or xray_executable_setting.changed
+  changed_when: true
+
+- name: Wait for Marzban after Xray restart
+  ansible.builtin.wait_for:
+    path: "{{ xray_marzban_socket_path }}"
+    state: present
+    timeout: 120
+
+- name: Read the pinned Xray version
+  ansible.builtin.command:
+    argv:
+      - "{{ xray_executable_path }}"
+      - version
+  register: xray_pinned_version
+  changed_when: false
+
+- name: Validate the active Xray configuration
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ xray_marzban_compose_file }}"
+      - -p
+      - marzban
+      - exec
+      - -T
+      - marzban
+      - "{{ xray_executable_path }}"
+      - run
+      - -test
+      - -config
+      - /var/lib/marzban/xray_config.json
+  changed_when: false
+
+- name: Find the running Xray process
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ xray_marzban_compose_file }}"
+      - -p
+      - marzban
+      - exec
+      - -T
+      - marzban
+      - pidof
+      - xray
+  register: xray_running_pid
+  changed_when: false
+
+- name: Resolve the running Xray executable
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ xray_marzban_compose_file }}"
+      - -p
+      - marzban
+      - exec
+      - -T
+      - marzban
+      - readlink
+      - "/proc/{{ xray_running_pid.stdout }}/exe"
+  register: xray_running_executable
+  changed_when: false
+
+- name: Request Marzban after Xray restart
+  ansible.builtin.command:
+    argv:
+      - curl
+      - --silent
+      - --show-error
+      - --fail
+      - --unix-socket
+      - "{{ xray_marzban_socket_path }}"
+      - http://localhost/dashboard/
+      - --output
+      - /dev/null
+  register: xray_marzban_request
+  changed_when: false
+  retries: 24
+  delay: 5
+  until: xray_marzban_request.rc == 0
+
+- name: Confirm pinned Xray acceptance conditions
+  ansible.builtin.assert:
+    that:
+      - xray_pinned_executable_stat.stat.checksum == xray_executable_sha256
+      - >-
+        xray_pinned_version.stdout_lines | first
+        is match("^Xray " ~ xray_version_number ~ " ")
+      - xray_running_pid.stdout is match('^[0-9]+$')
+      - xray_running_executable.stdout == xray_executable_path
+    fail_msg: >-
+      Xray version, configuration, running executable or restart persistence
+      did not match the pinned release.

@@ -57,3 +57,9 @@
       tags:
         - panel
         - marzban
+
+    - role: xray_core
+      when: xray_pin_enabled | bool
+      tags:
+        - core
+        - xray

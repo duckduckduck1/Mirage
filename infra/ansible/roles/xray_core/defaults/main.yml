@@ -1,0 +1,18 @@
+---
+xray_pin_enabled: false
+xray_version: v24.12.31
+xray_version_number: "{{ xray_version | regex_replace('^v', '') }}"
+
+xray_install_dir: /var/lib/marzban/xray-core
+xray_executable_path: "{{ xray_install_dir }}/xray"
+xray_archive_name: Xray-linux-64.zip
+xray_archive_path: "{{ xray_install_dir }}/{{ xray_version }}-{{ xray_archive_name }}"
+xray_download_url: >-
+  https://github.com/XTLS/Xray-core/releases/download/{{ xray_version }}/{{ xray_archive_name }}
+xray_archive_sha256: 445353d406081585a5e2958ed05372e3bf90ec6e4301d5ae7177231bb554077f
+xray_executable_sha256: e9858885b18ac6896c60b38b32dac007777f1076db34b6ce842703da26e10e28
+
+xray_marzban_app_dir: /opt/marzban
+xray_marzban_environment_file: "{{ xray_marzban_app_dir }}/.env"
+xray_marzban_compose_file: "{{ xray_marzban_app_dir }}/docker-compose.yml"
+xray_marzban_socket_path: /var/lib/marzban/marzban.socket
