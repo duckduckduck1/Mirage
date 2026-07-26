@@ -35,6 +35,11 @@
         - bootstrap
         - security
 
+    - role: network_tuning
+      tags:
+        - bootstrap
+        - network
+
     - role: ssh_hardening
       when: enable_ssh_hardening | bool
       tags:

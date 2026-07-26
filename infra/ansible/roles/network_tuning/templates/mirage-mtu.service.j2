@@ -1,0 +1,12 @@
+[Unit]
+Description=Apply Mirage MTU to {{ mirage_network_interface_resolved }}
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/ip link set dev {{ mirage_network_interface_resolved }} mtu {{ mirage_mtu }}
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

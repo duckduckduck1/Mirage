@@ -1,0 +1,10 @@
+---
+mirage_network_interface: ""
+mirage_mtu: 1400
+mirage_swappiness: 10
+mirage_default_qdisc: fq
+mirage_congestion_control: bbr
+
+mirage_sysctl_config_path: /etc/sysctl.d/99-mirage-network.conf
+mirage_modules_config_path: /etc/modules-load.d/mirage-network.conf
+mirage_mtu_unit_path: /etc/systemd/system/mirage-mtu.service

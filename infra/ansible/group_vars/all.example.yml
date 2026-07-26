@@ -8,8 +8,20 @@ admin_public_key_file: /root/.ssh/mirage_ed25519.pub
 allowed_tcp_ports:
   - 22
   - 443
+  - 2053
+  - 2096
+  - 8443
+  - 9443
 
-revoked_tcp_ports: []
+revoked_tcp_ports:
+  - 80
+  - 8388
 
-# Оставь false для первого запуска. Включай только после проверки входа по ключу.
-enable_ssh_hardening: false
+# Роль ставит rollback-таймер. После проверки нового key-only сеанса выполни
+# sudo /usr/local/sbin/mirage-ssh-confirm
+enable_ssh_hardening: true
+
+mirage_mtu: 1400
+mirage_swappiness: 10
+mirage_default_qdisc: fq
+mirage_congestion_control: bbr

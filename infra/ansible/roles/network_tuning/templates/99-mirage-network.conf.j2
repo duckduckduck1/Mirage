@@ -1,0 +1,4 @@
+# Managed by Ansible for Mirage.
+net.core.default_qdisc = {{ mirage_default_qdisc }}
+net.ipv4.tcp_congestion_control = {{ mirage_congestion_control }}
+vm.swappiness = {{ mirage_swappiness }}

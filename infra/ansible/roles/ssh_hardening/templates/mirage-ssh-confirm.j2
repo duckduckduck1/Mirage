@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+systemctl stop "{{ ssh_rollback_unit_name }}.timer" 2>/dev/null || true
+systemctl stop "{{ ssh_rollback_unit_name }}.service" 2>/dev/null || true
+systemctl reset-failed "{{ ssh_rollback_unit_name }}.service" 2>/dev/null || true
+
+if systemctl is-active --quiet "{{ ssh_rollback_unit_name }}.timer"; then
+  echo "SSH rollback timer is still active" >&2
+  exit 1
+fi
+
+echo "SSH hardening confirmed; automatic rollback cancelled."

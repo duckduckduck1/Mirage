@@ -1,0 +1,136 @@
+---
+- name: Require a default IPv4 network interface
+  ansible.builtin.assert:
+    that:
+      - (mirage_network_interface | length > 0) or (ansible_default_ipv4.interface | default('') | length > 0)
+    fail_msg: >-
+      The default IPv4 interface was not detected. Set mirage_network_interface
+      explicitly before applying network tuning.
+
+- name: Resolve network interface
+  ansible.builtin.set_fact:
+    mirage_network_interface_resolved: >-
+      {{
+        mirage_network_interface
+        if (mirage_network_interface | length > 0)
+        else ansible_default_ipv4.interface
+      }}
+
+- name: Validate network tuning values
+  ansible.builtin.assert:
+    that:
+      - mirage_mtu | int >= 1280
+      - mirage_mtu | int <= 1500
+      - mirage_swappiness | int >= 0
+      - mirage_swappiness | int <= 100
+      - mirage_default_qdisc == "fq"
+      - mirage_congestion_control == "bbr"
+
+- name: Install network tuning packages
+  ansible.builtin.apt:
+    name:
+      - iproute2
+      - kmod
+      - procps
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Persist BBR module loading
+  ansible.builtin.copy:
+    dest: "{{ mirage_modules_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      tcp_bbr
+
+- name: Load BBR module
+  ansible.builtin.command:
+    cmd: modprobe tcp_bbr
+  changed_when: false
+
+- name: Install network sysctl configuration
+  ansible.builtin.template:
+    src: 99-mirage-network.conf.j2
+    dest: "{{ mirage_sysctl_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: mirage_sysctl_config
+
+- name: Apply system sysctl configuration
+  ansible.builtin.command:
+    cmd: sysctl --system
+  when: mirage_sysctl_config.changed
+  changed_when: true
+
+- name: Install persistent MTU service
+  ansible.builtin.template:
+    src: mirage-mtu.service.j2
+    dest: "{{ mirage_mtu_unit_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: mirage_mtu_unit
+
+- name: Reload systemd after MTU unit change
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: mirage_mtu_unit.changed
+
+- name: Read MTU before applying it
+  ansible.builtin.command:
+    argv:
+      - cat
+      - "/sys/class/net/{{ mirage_network_interface_resolved }}/mtu"
+  register: mirage_mtu_before
+  changed_when: false
+
+- name: Apply MTU when it differs
+  ansible.builtin.command:
+    argv:
+      - ip
+      - link
+      - set
+      - dev
+      - "{{ mirage_network_interface_resolved }}"
+      - mtu
+      - "{{ mirage_mtu | string }}"
+  when: (mirage_mtu_before.stdout | int) != (mirage_mtu | int)
+  changed_when: true
+
+- name: Enable persistent MTU service
+  ansible.builtin.systemd:
+    name: mirage-mtu.service
+    state: started
+    enabled: true
+
+- name: Read effective network tuning
+  ansible.builtin.command:
+    argv:
+      - sysctl
+      - -n
+      - "{{ item }}"
+  loop:
+    - net.core.default_qdisc
+    - net.ipv4.tcp_congestion_control
+    - vm.swappiness
+  register: mirage_sysctl_effective
+  changed_when: false
+
+- name: Read effective interface MTU
+  ansible.builtin.command:
+    argv:
+      - cat
+      - "/sys/class/net/{{ mirage_network_interface_resolved }}/mtu"
+  register: mirage_mtu_effective
+  changed_when: false
+
+- name: Confirm effective network tuning
+  ansible.builtin.assert:
+    that:
+      - mirage_sysctl_effective.results[0].stdout == mirage_default_qdisc
+      - mirage_sysctl_effective.results[1].stdout == mirage_congestion_control
+      - (mirage_sysctl_effective.results[2].stdout | int) == (mirage_swappiness | int)
+      - (mirage_mtu_effective.stdout | int) == (mirage_mtu | int)
