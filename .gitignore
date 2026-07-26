@@ -45,6 +45,7 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+.tools/
 ops/xui/*.local.json
 ops/xui/output/
 
