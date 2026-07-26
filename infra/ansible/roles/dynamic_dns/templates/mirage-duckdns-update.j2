@@ -1,0 +1,53 @@
+#!/bin/sh
+set -eu
+
+fail() {
+  printf '%s\n' "DuckDNS update failed: $1" >&2
+  exit 1
+}
+
+: "${DUCKDNS_FQDN:?DUCKDNS_FQDN is required}"
+: "${DUCKDNS_CREDENTIAL_FILE:?DUCKDNS_CREDENTIAL_FILE is required}"
+
+case "$DUCKDNS_FQDN" in
+  *.duckdns.org)
+    duckdns_subdomain="${DUCKDNS_FQDN%.duckdns.org}"
+    ;;
+  *)
+    fail "invalid domain"
+    ;;
+esac
+
+case "$duckdns_subdomain" in
+  ""|*[!a-z0-9-]*)
+    fail "invalid subdomain"
+    ;;
+esac
+
+[ -r "$DUCKDNS_CREDENTIAL_FILE" ] || fail "token file is not readable"
+
+duckdns_token="$(tr -d '\r\n' < "$DUCKDNS_CREDENTIAL_FILE")"
+case "$duckdns_token" in
+  ""|*[!A-Za-z0-9-]*)
+    fail "invalid token file"
+    ;;
+esac
+
+duckdns_response="$(
+  {
+    printf '%s\n' 'url = "https://www.duckdns.org/update"'
+    printf '%s\n' 'get'
+    printf '%s\n' 'fail'
+    printf '%s\n' 'silent'
+    printf '%s\n' 'show-error'
+    printf '%s\n' 'connect-timeout = 15'
+    printf '%s\n' 'max-time = 45'
+    printf '%s\n' 'retry = 2'
+    printf 'data-urlencode = "domains=%s"\n' "$duckdns_subdomain"
+    printf 'data-urlencode = "token=%s"\n' "$duckdns_token"
+  } | curl --config -
+)" || fail "HTTPS request failed"
+unset duckdns_token
+
+[ "$duckdns_response" = "OK" ] || fail "provider rejected update"
+printf '%s\n' "DuckDNS update completed."

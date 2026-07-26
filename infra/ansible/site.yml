@@ -40,6 +40,12 @@
         - bootstrap
         - network
 
+    - role: dynamic_dns
+      when: dynamic_dns_enabled | bool
+      tags:
+        - dns
+        - dynamic-dns
+
     - role: ssh_hardening
       when: enable_ssh_hardening | bool
       tags:

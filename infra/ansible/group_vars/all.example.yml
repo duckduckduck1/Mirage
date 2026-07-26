@@ -25,3 +25,9 @@ mirage_mtu: 1400
 mirage_swappiness: 10
 mirage_default_qdisc: fq
 mirage_congestion_control: bbr
+
+# Динамический DNS включается только после размещения токена на целевом VPS.
+# Настоящее имя и токен остаются вне Git.
+dynamic_dns_enabled: false
+duckdns_fqdn: vpn-subdomain.duckdns.org
+duckdns_token_file: /etc/mirage/secrets/duckdns_token

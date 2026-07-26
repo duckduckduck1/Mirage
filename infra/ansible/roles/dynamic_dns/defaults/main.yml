@@ -1,0 +1,14 @@
+---
+dynamic_dns_enabled: false
+
+duckdns_fqdn: ""
+duckdns_token_file: /etc/mirage/secrets/duckdns_token
+duckdns_environment_file: /etc/mirage/dynamic-dns.env
+duckdns_update_script: /usr/local/sbin/mirage-duckdns-update
+
+duckdns_update_on_boot_delay: 2min
+duckdns_update_interval: 5min
+duckdns_update_random_delay: 30s
+duckdns_dns_check_retries: 12
+duckdns_dns_check_delay: 10
+duckdns_expected_ipv4: "{{ ansible_default_ipv4.address }}"
