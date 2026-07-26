@@ -1,0 +1,233 @@
+---
+- name: Validate Marzban installation settings
+  ansible.builtin.assert:
+    that:
+      - marzban_version is match('^v[0-9]+\.[0-9]+\.[0-9]+$')
+      - marzban_app_dir == "/opt/marzban"
+      - marzban_data_dir == "/var/lib/marzban"
+      - marzban_socket_path is match('^/var/lib/marzban/[A-Za-z0-9._-]+$')
+      - marzban_installer_url == "https://github.com/Gozargah/Marzban-scripts/raw/master/marzban.sh"
+    fail_msg: >-
+      Use the documented Marzban paths, official installer and a pinned release.
+
+- name: Inspect existing Marzban application directory
+  ansible.builtin.stat:
+    path: "{{ marzban_app_dir }}"
+  register: marzban_app_dir_stat
+
+- name: Inspect existing Marzban Compose file
+  ansible.builtin.stat:
+    path: "{{ marzban_compose_file }}"
+  register: marzban_compose_file_stat
+
+- name: Refuse to overwrite a partial or foreign Marzban installation
+  ansible.builtin.assert:
+    that:
+      - >-
+        (not marzban_app_dir_stat.stat.exists) or
+        (
+          marzban_app_dir_stat.stat.isdir | default(false) and
+          marzban_compose_file_stat.stat.exists and
+          marzban_compose_file_stat.stat.isreg | default(false)
+        )
+    fail_msg: >-
+      The Marzban application directory exists without its documented Compose
+      file. Inspect it manually; this role will not overwrite it.
+
+- name: Check Docker Compose availability
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - version
+  register: marzban_docker_compose_version
+  changed_when: false
+  failed_when: false
+
+- name: Require Docker Compose on an existing shared VPS
+  ansible.builtin.assert:
+    that:
+      - marzban_docker_compose_version.rc == 0
+    fail_msg: >-
+      Docker Compose is required before this shared-VPS installation. Install
+      Docker with the official Marzban command on a clean host, then retry.
+
+- name: Install Marzban with the official installer
+  when: not marzban_compose_file_stat.stat.exists
+  block:
+    - name: Download the official Marzban installer
+      ansible.builtin.get_url:
+        url: "{{ marzban_installer_url }}"
+        dest: "{{ marzban_installer_path }}"
+        owner: root
+        group: root
+        mode: "0700"
+        force: true
+
+    - name: Clear a previous transient installer unit
+      ansible.builtin.systemd:
+        name: "{{ marzban_installer_unit }}.service"
+        state: stopped
+      failed_when: false
+
+    - name: Start the official Marzban installer in a transient unit
+      ansible.builtin.command:
+        argv:
+          - systemd-run
+          - "--unit={{ marzban_installer_unit }}"
+          - --collect
+          - --property=Type=exec
+          - /bin/bash
+          - "{{ marzban_installer_path }}"
+          - install
+          - --version
+          - "{{ marzban_version }}"
+      changed_when: true
+
+    - name: Wait for the official Compose file
+      ansible.builtin.wait_for:
+        path: "{{ marzban_compose_file }}"
+        state: present
+        timeout: "{{ marzban_install_retries * marzban_install_delay }}"
+
+    - name: Wait for the Marzban service
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - "{{ marzban_compose_file }}"
+          - -p
+          - marzban
+          - ps
+          - --status
+          - running
+          - --services
+      register: marzban_install_service_state
+      changed_when: false
+      retries: "{{ marzban_install_retries }}"
+      delay: "{{ marzban_install_delay }}"
+      until: "'marzban' in marzban_install_service_state.stdout_lines"
+  always:
+    - name: Stop the transient installer log follower
+      ansible.builtin.systemd:
+        name: "{{ marzban_installer_unit }}.service"
+        state: stopped
+      failed_when: false
+
+    - name: Remove the transient installer copy
+      ansible.builtin.file:
+        path: "{{ marzban_installer_path }}"
+        state: absent
+
+- name: Pin the documented Marzban image release
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ marzban_compose_file }}"
+      - -p
+      - marzban
+      - config
+      - --images
+  register: marzban_compose_images
+  changed_when: false
+
+- name: Confirm the configured Marzban release
+  ansible.builtin.assert:
+    that:
+      - marzban_compose_images.stdout_lines == ["gozargah/marzban:" ~ marzban_version]
+    fail_msg: >-
+      The installed Compose file does not use the pinned Marzban release.
+
+- name: Configure Marzban Unix socket
+  ansible.builtin.lineinfile:
+    path: "{{ marzban_environment_file }}"
+    regexp: '^#?[ \t]*UVICORN_UDS[ \t]*[:=].*$'
+    line: 'UVICORN_UDS = "{{ marzban_socket_path }}"'
+    owner: root
+    group: root
+    mode: "0600"
+  register: marzban_uds_setting
+  no_log: true
+
+- name: Disable Marzban API documentation
+  ansible.builtin.lineinfile:
+    path: "{{ marzban_environment_file }}"
+    regexp: '^#?[ \t]*DOCS[ \t]*=.*$'
+    line: "DOCS = false"
+    owner: root
+    group: root
+    mode: "0600"
+  register: marzban_docs_setting
+  no_log: true
+
+- name: Disable Marzban debug mode
+  ansible.builtin.lineinfile:
+    path: "{{ marzban_environment_file }}"
+    regexp: '^#?[ \t]*DEBUG[ \t]*=.*$'
+    line: "DEBUG = false"
+    owner: root
+    group: root
+    mode: "0600"
+  register: marzban_debug_setting
+  no_log: true
+
+- name: Restart Marzban after environment changes
+  ansible.builtin.command:
+    argv:
+      - marzban
+      - restart
+      - --no-logs
+  when: >-
+    marzban_uds_setting.changed or
+    marzban_docs_setting.changed or
+    marzban_debug_setting.changed
+  changed_when: true
+
+- name: Wait for the Marzban Unix socket
+  ansible.builtin.wait_for:
+    path: "{{ marzban_socket_path }}"
+    state: present
+    timeout: 120
+
+- name: Inspect the Marzban Unix socket
+  ansible.builtin.stat:
+    path: "{{ marzban_socket_path }}"
+  register: marzban_socket_stat
+
+- name: Request the Marzban dashboard through its Unix socket
+  ansible.builtin.command:
+    argv:
+      - curl
+      - --silent
+      - --show-error
+      - --fail
+      - --unix-socket
+      - "{{ marzban_socket_path }}"
+      - http://localhost/dashboard/
+      - --output
+      - /dev/null
+  changed_when: false
+
+- name: Confirm Marzban panel acceptance conditions
+  ansible.builtin.assert:
+    that:
+      - marzban_socket_stat.stat.exists
+      - marzban_socket_stat.stat.issock | default(false)
+      - marzban_compose_images.stdout_lines == ["gozargah/marzban:" ~ marzban_version]
+    fail_msg: "Marzban panel installation checks did not pass."
+
+- name: Pause for owner-created Marzban administrator and login check
+  ansible.builtin.pause:
+    prompt: |-
+      In a second key-based SSH session, run:
+        sudo marzban cli admin create --sudo
+
+      Forward the Unix socket from the workstation:
+        ssh -L 8000:{{ marzban_socket_path }} mirage@SERVER_HOST
+
+      Open http://127.0.0.1:8000/dashboard/ and verify administrator login.
+      Press Enter only after the login succeeds.
+  when: marzban_acceptance_prompt | bool

@@ -1,0 +1,17 @@
+---
+marzban_install_enabled: false
+marzban_version: v0.8.4
+marzban_acceptance_prompt: true
+
+marzban_app_dir: /opt/marzban
+marzban_data_dir: /var/lib/marzban
+marzban_compose_file: "{{ marzban_app_dir }}/docker-compose.yml"
+marzban_environment_file: "{{ marzban_app_dir }}/.env"
+marzban_socket_path: "{{ marzban_data_dir }}/marzban.socket"
+
+marzban_installer_url: >-
+  https://github.com/Gozargah/Marzban-scripts/raw/master/marzban.sh
+marzban_installer_path: /run/mirage-marzban-installer
+marzban_installer_unit: mirage-marzban-install
+marzban_install_retries: 120
+marzban_install_delay: 5

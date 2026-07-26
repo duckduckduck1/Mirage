@@ -31,3 +31,9 @@ mirage_congestion_control: bbr
 dynamic_dns_enabled: false
 duckdns_fqdn: vpn-subdomain.duckdns.org
 duckdns_token_file: /etc/mirage/secrets/duckdns_token
+
+# Панель ставится отдельным запуском после подтверждения SSH-hardening.
+# Администратора владелец создаёт лично через штатный Marzban CLI.
+marzban_install_enabled: false
+marzban_version: v0.8.4
+marzban_acceptance_prompt: true

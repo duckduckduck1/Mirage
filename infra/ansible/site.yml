@@ -51,3 +51,9 @@
       tags:
         - hardening
         - ssh
+
+    - role: marzban
+      when: marzban_install_enabled | bool
+      tags:
+        - panel
+        - marzban
