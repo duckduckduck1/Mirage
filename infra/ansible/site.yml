@@ -63,3 +63,9 @@
       tags:
         - core
         - xray
+
+    - role: xray_inbounds
+      when: xray_inbounds_enabled | bool
+      tags:
+        - inbounds
+        - xray

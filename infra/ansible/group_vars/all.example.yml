@@ -47,3 +47,15 @@ marzban_a13_patch_enabled: true
 # полной проверки матрицы клиентов.
 xray_pin_enabled: false
 xray_version: v24.12.31
+
+# Этап 4 включается только после выбора трёх разных REALITY target-доменов
+# по требованиям PLAN.md и размещения общего TLS-сертификата для Trojan.
+xray_inbounds_enabled: false
+xray_inbounds_targets_owner_reviewed: false
+xray_reality_tcp_target: tcp-mask.example.net:443
+xray_reality_tcp_server_name: tcp-mask.example.net
+xray_reality_grpc_target: grpc-mask.example.net:443
+xray_reality_grpc_server_name: grpc-mask.example.net
+xray_reality_xhttp_target: xhttp-mask.example.net:443
+xray_reality_xhttp_server_name: xhttp-mask.example.net
+xray_trojan_server_name: vpn-subdomain.example.net

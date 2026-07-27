@@ -1,0 +1,642 @@
+---
+- name: Validate stage 4 inbound settings
+  ansible.builtin.assert:
+    that:
+      - xray_inbounds_targets_owner_reviewed | bool
+      - xray_inbounds_config_path == "/var/lib/marzban/xray_config.json"
+      - >-
+        xray_inbounds_backup_path ==
+        "/var/lib/marzban/xray_config.pre-mirage-inbounds.json"
+      - >-
+        xray_inbounds_candidate_path ==
+        "/var/lib/marzban/.xray_config.mirage-candidate.json"
+      - >-
+        xray_inbounds_xray_executable_path ==
+        "/var/lib/marzban/xray-core/xray"
+      - xray_inbound_tcp_port == 443
+      - xray_inbound_grpc_port == 8443
+      - xray_inbound_xhttp_port == 2053
+      - xray_inbound_trojan_port == 9443
+      - >-
+        [
+          xray_inbound_tcp_port,
+          xray_inbound_grpc_port,
+          xray_inbound_xhttp_port,
+          xray_inbound_trojan_port
+        ] | unique | length == 4
+      - >-
+        [
+          xray_inbound_tcp_port,
+          xray_inbound_grpc_port,
+          xray_inbound_xhttp_port,
+          xray_inbound_trojan_port
+        ] | difference(allowed_tcp_ports | default([])) | length == 0
+      - >-
+        xray_reality_tcp_target ==
+        xray_reality_tcp_server_name ~ ":443"
+      - >-
+        xray_reality_grpc_target ==
+        xray_reality_grpc_server_name ~ ":443"
+      - >-
+        xray_reality_xhttp_target ==
+        xray_reality_xhttp_server_name ~ ":443"
+      - >-
+        xray_reality_tcp_server_name is
+        match('^(?=.{1,253}$)(?!-)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,63}$')
+      - >-
+        xray_reality_grpc_server_name is
+        match('^(?=.{1,253}$)(?!-)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,63}$')
+      - >-
+        xray_reality_xhttp_server_name is
+        match('^(?=.{1,253}$)(?!-)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,63}$')
+      - >-
+        [
+          xray_reality_tcp_server_name,
+          xray_reality_grpc_server_name,
+          xray_reality_xhttp_server_name
+        ] | unique | length == 3
+      - "'example.' not in xray_reality_tcp_server_name"
+      - "'example.' not in xray_reality_grpc_server_name"
+      - "'example.' not in xray_reality_xhttp_server_name"
+      - >-
+        xray_trojan_server_name is
+        match('^(?=.{1,253}$)(?!-)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,63}$')
+      - "'example.' not in xray_trojan_server_name"
+      - >-
+        xray_trojan_certificate_path ==
+        "/var/lib/marzban/certs/fullchain.pem"
+      - xray_trojan_key_path == "/var/lib/marzban/certs/key.pem"
+      - xray_reality_grpc_service_name is match('^[A-Za-z0-9._-]{1,64}$')
+      - xray_reality_spider_x.startswith("/")
+    fail_msg: >-
+      Stage 4 requires the reviewed ports, three distinct REALITY targets,
+      documented certificate paths and an explicit owner review.
+
+- name: Verify REALITY targets from the VPS with TLS 1.3
+  ansible.builtin.shell:
+    cmd: >-
+      timeout 15 openssl s_client
+      -connect {{ item.target | quote }}
+      -servername {{ item.server_name | quote }}
+      -verify_hostname {{ item.server_name | quote }}
+      -verify_return_error
+      -tls1_3
+      -brief
+      </dev/null
+    executable: /bin/bash
+  loop:
+    - target: "{{ xray_reality_tcp_target }}"
+      server_name: "{{ xray_reality_tcp_server_name }}"
+    - target: "{{ xray_reality_grpc_target }}"
+      server_name: "{{ xray_reality_grpc_server_name }}"
+    - target: "{{ xray_reality_xhttp_target }}"
+      server_name: "{{ xray_reality_xhttp_server_name }}"
+  loop_control:
+    label: "{{ item.server_name }}"
+  changed_when: false
+  no_log: true
+
+- name: Inspect stage 4 prerequisites
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: true
+  loop:
+    - "{{ xray_inbounds_config_path }}"
+    - "{{ xray_inbounds_marzban_compose_file }}"
+    - "{{ xray_inbounds_xray_executable_path }}"
+    - "{{ xray_trojan_certificate_path }}"
+    - "{{ xray_trojan_key_path }}"
+  register: xray_inbounds_prerequisite_stats
+
+- name: Require Marzban, pinned Xray and the Trojan certificate
+  ansible.builtin.assert:
+    that:
+      - xray_inbounds_prerequisite_stats.results | length == 5
+      - >-
+        xray_inbounds_prerequisite_stats.results
+        | map(attribute="stat.exists") | min
+      - >-
+        xray_inbounds_prerequisite_stats.results
+        | map(attribute="stat.isreg") | min
+    fail_msg: >-
+      Install Marzban and pinned Xray, then place the shared TLS certificate
+      before enabling the four inbounds.
+
+- name: Validate the Trojan certificate
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "{{ xray_trojan_certificate_path }}"
+      - -checkhost
+      - "{{ xray_trojan_server_name }}"
+      - -noout
+  changed_when: false
+  no_log: true
+
+- name: Require a currently valid Trojan certificate
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "{{ xray_trojan_certificate_path }}"
+      - -checkend
+      - "0"
+      - -noout
+  changed_when: false
+  no_log: true
+
+- name: Validate the Trojan private key
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - pkey
+      - -in
+      - "{{ xray_trojan_key_path }}"
+      - -noout
+  changed_when: false
+  no_log: true
+
+- name: Read the active UFW policy
+  ansible.builtin.command:
+    argv:
+      - ufw
+      - status
+  register: xray_inbounds_ufw_status
+  changed_when: false
+
+- name: Require active firewall rules for all four inbounds
+  ansible.builtin.assert:
+    that:
+      - "'Status: active' in xray_inbounds_ufw_status.stdout"
+      - >-
+        xray_inbounds_ufw_status.stdout is
+        regex('(?m)^443/tcp\s+ALLOW')
+      - >-
+        xray_inbounds_ufw_status.stdout is
+        regex('(?m)^8443/tcp\s+ALLOW')
+      - >-
+        xray_inbounds_ufw_status.stdout is
+        regex('(?m)^2053/tcp\s+ALLOW')
+      - >-
+        xray_inbounds_ufw_status.stdout is
+        regex('(?m)^9443/tcp\s+ALLOW')
+    fail_msg: >-
+      UFW must be active and allow TCP ports 443, 8443, 2053 and 9443
+      before stage 4 can continue.
+
+- name: Create the root-only inbound secret directory
+  ansible.builtin.file:
+    path: "{{ xray_inbounds_secret_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Inspect existing REALITY private keys
+  ansible.builtin.stat:
+    path: "{{ item.private_key_path }}"
+  loop: "{{ xray_reality_secret_specs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: xray_reality_private_key_stats
+  no_log: true
+
+- name: Generate missing REALITY key pairs with Xray
+  ansible.builtin.command:
+    argv:
+      - "{{ xray_inbounds_xray_executable_path }}"
+      - x25519
+  loop: "{{ xray_reality_private_key_stats.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: not item.stat.exists
+  register: xray_reality_private_key_generation
+  changed_when: true
+  no_log: true
+
+- name: Store generated REALITY private keys
+  ansible.builtin.copy:
+    content: >-
+      {{
+        (
+          item.stdout_lines
+          | select("match", "^Private key: ")
+          | list
+          | first
+          | regex_replace("^Private key: ", "")
+        )
+      }}
+    dest: "{{ item.item.item.private_key_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  loop: "{{ xray_reality_private_key_generation.results }}"
+  loop_control:
+    label: "{{ item.item.item.name }}"
+  when: not (item.skipped | default(false))
+  no_log: true
+
+- name: Inspect existing REALITY short IDs
+  ansible.builtin.stat:
+    path: "{{ item.short_id_path }}"
+  loop: "{{ xray_reality_secret_specs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: xray_reality_short_id_stats
+  no_log: true
+
+- name: Generate missing REALITY short IDs with OpenSSL
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - rand
+      - -hex
+      - "8"
+  loop: "{{ xray_reality_short_id_stats.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: not item.stat.exists
+  register: xray_reality_short_id_generation
+  changed_when: true
+  no_log: true
+
+- name: Store generated REALITY short IDs
+  ansible.builtin.copy:
+    content: "{{ item.stdout | trim }}\n"
+    dest: "{{ item.item.item.short_id_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  loop: "{{ xray_reality_short_id_generation.results }}"
+  loop_control:
+    label: "{{ item.item.item.name }}"
+  when: not (item.skipped | default(false))
+  no_log: true
+
+- name: Enforce REALITY secret permissions
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: file
+    owner: root
+    group: root
+    mode: "0600"
+  loop: >-
+    {{
+      (
+        xray_reality_secret_specs
+        | map(attribute="private_key_path")
+        | list
+      )
+      +
+      (
+        xray_reality_secret_specs
+        | map(attribute="short_id_path")
+        | list
+      )
+    }}
+  loop_control:
+    label: "{{ item }}"
+  no_log: true
+
+- name: Read REALITY private keys
+  ansible.builtin.slurp:
+    src: "{{ item.private_key_path }}"
+  loop: "{{ xray_reality_secret_specs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: xray_reality_private_key_files
+  no_log: true
+
+- name: Read REALITY short IDs
+  ansible.builtin.slurp:
+    src: "{{ item.short_id_path }}"
+  loop: "{{ xray_reality_secret_specs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: xray_reality_short_id_files
+  no_log: true
+
+- name: Assemble root-only REALITY values
+  ansible.builtin.set_fact:
+    xray_reality_private_keys: >-
+      {{
+        dict(
+          xray_reality_private_key_files.results
+          | map(attribute="item.name")
+          | zip(
+            xray_reality_private_key_files.results
+            | map(attribute="content")
+            | map("b64decode")
+            | map("trim")
+          )
+        )
+      }}
+    xray_reality_short_ids: >-
+      {{
+        dict(
+          xray_reality_short_id_files.results
+          | map(attribute="item.name")
+          | zip(
+            xray_reality_short_id_files.results
+            | map(attribute="content")
+            | map("b64decode")
+            | map("trim")
+          )
+        )
+      }}
+  no_log: true
+
+- name: Validate generated REALITY values
+  ansible.builtin.assert:
+    that:
+      - xray_reality_private_keys.tcp is match('^[A-Za-z0-9_-]{43}$')
+      - xray_reality_private_keys.grpc is match('^[A-Za-z0-9_-]{43}$')
+      - xray_reality_private_keys.xhttp is match('^[A-Za-z0-9_-]{43}$')
+      - xray_reality_private_keys.values() | unique | length == 3
+      - xray_reality_short_ids.tcp is match('^[0-9a-f]{16}$')
+      - xray_reality_short_ids.grpc is match('^[0-9a-f]{16}$')
+      - xray_reality_short_ids.xhttp is match('^[0-9a-f]{16}$')
+      - xray_reality_short_ids.values() | unique | length == 3
+    fail_msg: "Generated REALITY secrets are missing, malformed or reused."
+  no_log: true
+
+- name: Read the current Marzban Core Settings
+  ansible.builtin.slurp:
+    src: "{{ xray_inbounds_config_path }}"
+  register: xray_inbounds_current_config_file
+  no_log: true
+
+- name: Assemble the four documented inbounds
+  ansible.builtin.set_fact:
+    xray_inbounds_definitions:
+      - tag: "{{ xray_inbound_tcp_tag }}"
+        listen: 0.0.0.0
+        port: "{{ xray_inbound_tcp_port }}"
+        protocol: vless
+        settings:
+          clients: []
+          decryption: none
+        streamSettings:
+          network: tcp
+          tcpSettings: {}
+          security: reality
+          realitySettings:
+            show: false
+            dest: "{{ xray_reality_tcp_target }}"
+            xver: 0
+            serverNames:
+              - "{{ xray_reality_tcp_server_name }}"
+            privateKey: "{{ xray_reality_private_keys.tcp }}"
+            SpiderX: "{{ xray_reality_spider_x }}"
+            shortIds:
+              - "{{ xray_reality_short_ids.tcp }}"
+        sniffing:
+          enabled: true
+          destOverride:
+            - http
+            - tls
+            - quic
+      - tag: "{{ xray_inbound_grpc_tag }}"
+        listen: 0.0.0.0
+        port: "{{ xray_inbound_grpc_port }}"
+        protocol: vless
+        settings:
+          clients: []
+          decryption: none
+        streamSettings:
+          network: grpc
+          grpcSettings:
+            serviceName: "{{ xray_reality_grpc_service_name }}"
+          security: reality
+          realitySettings:
+            show: false
+            dest: "{{ xray_reality_grpc_target }}"
+            xver: 0
+            serverNames:
+              - "{{ xray_reality_grpc_server_name }}"
+            privateKey: "{{ xray_reality_private_keys.grpc }}"
+            SpiderX: "{{ xray_reality_spider_x }}"
+            shortIds:
+              - "{{ xray_reality_short_ids.grpc }}"
+        sniffing:
+          enabled: true
+          destOverride:
+            - http
+            - tls
+            - quic
+      - tag: "{{ xray_inbound_xhttp_tag }}"
+        listen: 0.0.0.0
+        port: "{{ xray_inbound_xhttp_port }}"
+        protocol: vless
+        settings:
+          clients: []
+          decryption: none
+        streamSettings:
+          network: xhttp
+          xhttpSettings:
+            mode: auto
+          security: reality
+          realitySettings:
+            show: false
+            dest: "{{ xray_reality_xhttp_target }}"
+            xver: 0
+            serverNames:
+              - "{{ xray_reality_xhttp_server_name }}"
+            privateKey: "{{ xray_reality_private_keys.xhttp }}"
+            SpiderX: "{{ xray_reality_spider_x }}"
+            shortIds:
+              - "{{ xray_reality_short_ids.xhttp }}"
+        sniffing:
+          enabled: true
+          destOverride:
+            - http
+            - tls
+            - quic
+      - tag: "{{ xray_inbound_trojan_tag }}"
+        listen: 0.0.0.0
+        port: "{{ xray_inbound_trojan_port }}"
+        protocol: trojan
+        settings:
+          clients: []
+          decryption: none
+        streamSettings:
+          network: tcp
+          security: tls
+          tlsSettings:
+            serverName: "{{ xray_trojan_server_name }}"
+            certificates:
+              - ocspStapling: 3600
+                certificateFile: "{{ xray_trojan_certificate_path }}"
+                keyFile: "{{ xray_trojan_key_path }}"
+            minVersion: "1.2"
+            cipherSuites: "{{ xray_trojan_cipher_suites | replace(' ', '') }}"
+        sniffing:
+          enabled: true
+          destOverride:
+            - http
+            - tls
+            - quic
+  no_log: true
+
+- name: Assemble the updated Marzban Core Settings
+  ansible.builtin.set_fact:
+    xray_inbounds_target_config: >-
+      {{
+        (
+          xray_inbounds_current_config_file.content
+          | b64decode
+          | from_json
+        )
+        | combine({"inbounds": xray_inbounds_definitions}, recursive=false)
+      }}
+  no_log: true
+
+- name: Inspect the one-time Core Settings backup
+  ansible.builtin.stat:
+    path: "{{ xray_inbounds_backup_path }}"
+  register: xray_inbounds_backup_stat
+
+- name: Preserve Core Settings before the first stage 4 change
+  ansible.builtin.copy:
+    src: "{{ xray_inbounds_config_path }}"
+    dest: "{{ xray_inbounds_backup_path }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0600"
+  when: not xray_inbounds_backup_stat.stat.exists
+  no_log: true
+
+- name: Validate and install stage 4 Core Settings
+  block:
+    - name: Write the root-only Core Settings candidate
+      ansible.builtin.copy:
+        content: "{{ xray_inbounds_target_config | to_nice_json }}\n"
+        dest: "{{ xray_inbounds_candidate_path }}"
+        owner: root
+        group: root
+        mode: "0600"
+      changed_when: false
+      no_log: true
+
+    - name: Validate the Core Settings candidate with pinned Xray
+      ansible.builtin.command:
+        argv:
+          - "{{ xray_inbounds_xray_executable_path }}"
+          - run
+          - -test
+          - -config
+          - "{{ xray_inbounds_candidate_path }}"
+      changed_when: false
+      no_log: true
+
+    - name: Install the validated Core Settings
+      ansible.builtin.copy:
+        content: "{{ xray_inbounds_target_config | to_nice_json }}\n"
+        dest: "{{ xray_inbounds_config_path }}"
+        owner: root
+        group: root
+        mode: "0600"
+      register: xray_inbounds_config_install
+      no_log: true
+  always:
+    - name: Remove the Core Settings candidate
+      ansible.builtin.file:
+        path: "{{ xray_inbounds_candidate_path }}"
+        state: absent
+      changed_when: false
+
+- name: Restart Marzban after the inbound change
+  ansible.builtin.command:
+    argv:
+      - marzban
+      - restart
+      - --no-logs
+  when: xray_inbounds_config_install.changed
+  changed_when: true
+
+- name: Wait for Marzban after the inbound change
+  ansible.builtin.wait_for:
+    path: "{{ xray_inbounds_marzban_socket_path }}"
+    state: present
+    timeout: 120
+
+- name: Validate active Core Settings with pinned Xray
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ xray_inbounds_marzban_compose_file }}"
+      - -p
+      - marzban
+      - exec
+      - -T
+      - marzban
+      - "{{ xray_inbounds_xray_executable_path }}"
+      - run
+      - -test
+      - -config
+      - "{{ xray_inbounds_config_path }}"
+  changed_when: false
+
+- name: Wait for all four inbound ports
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ item }}"
+    state: started
+    timeout: 30
+  loop:
+    - "{{ xray_inbound_tcp_port }}"
+    - "{{ xray_inbound_grpc_port }}"
+    - "{{ xray_inbound_xhttp_port }}"
+    - "{{ xray_inbound_trojan_port }}"
+
+- name: Read active Core Settings for acceptance
+  ansible.builtin.slurp:
+    src: "{{ xray_inbounds_config_path }}"
+  register: xray_inbounds_active_config_file
+  no_log: true
+
+- name: Confirm all four documented inbounds
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          xray_inbounds_active_config_file.content
+          | b64decode
+          | from_json
+        ).inbounds | length == 4
+      - >-
+        (
+          xray_inbounds_active_config_file.content
+          | b64decode
+          | from_json
+        ).inbounds | map(attribute="tag") | list ==
+        [
+          xray_inbound_tcp_tag,
+          xray_inbound_grpc_tag,
+          xray_inbound_xhttp_tag,
+          xray_inbound_trojan_tag
+        ]
+      - >-
+        (
+          xray_inbounds_active_config_file.content
+          | b64decode
+          | from_json
+        ).inbounds
+        | map(attribute="streamSettings.network")
+        | list == ["tcp", "grpc", "xhttp", "tcp"]
+      - >-
+        (
+          xray_inbounds_active_config_file.content
+          | b64decode
+          | from_json
+        ).inbounds
+        | map(attribute="streamSettings.security")
+        | list == ["reality", "reality", "reality", "tls"]
+    fail_msg: "The active Core Settings do not contain the four reviewed inbounds."
+  no_log: true

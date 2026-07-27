@@ -1,0 +1,67 @@
+---
+xray_inbounds_enabled: false
+xray_inbounds_targets_owner_reviewed: false
+
+xray_inbounds_config_path: /var/lib/marzban/xray_config.json
+xray_inbounds_backup_path: /var/lib/marzban/xray_config.pre-mirage-inbounds.json
+xray_inbounds_candidate_path: /var/lib/marzban/.xray_config.mirage-candidate.json
+xray_inbounds_marzban_socket_path: /var/lib/marzban/marzban.socket
+xray_inbounds_marzban_compose_file: /opt/marzban/docker-compose.yml
+xray_inbounds_xray_executable_path: /var/lib/marzban/xray-core/xray
+
+xray_inbounds_secret_dir: /etc/mirage/secrets
+xray_reality_tcp_private_key_path: >-
+  {{ xray_inbounds_secret_dir }}/reality-tcp-private-key
+xray_reality_tcp_short_id_path: >-
+  {{ xray_inbounds_secret_dir }}/reality-tcp-short-id
+xray_reality_grpc_private_key_path: >-
+  {{ xray_inbounds_secret_dir }}/reality-grpc-private-key
+xray_reality_grpc_short_id_path: >-
+  {{ xray_inbounds_secret_dir }}/reality-grpc-short-id
+xray_reality_xhttp_private_key_path: >-
+  {{ xray_inbounds_secret_dir }}/reality-xhttp-private-key
+xray_reality_xhttp_short_id_path: >-
+  {{ xray_inbounds_secret_dir }}/reality-xhttp-short-id
+
+xray_reality_tcp_target: tcp-mask.example.net:443
+xray_reality_tcp_server_name: tcp-mask.example.net
+xray_reality_grpc_target: grpc-mask.example.net:443
+xray_reality_grpc_server_name: grpc-mask.example.net
+xray_reality_xhttp_target: xhttp-mask.example.net:443
+xray_reality_xhttp_server_name: xhttp-mask.example.net
+
+xray_reality_grpc_service_name: mirage-grpc
+xray_reality_spider_x: /
+
+xray_trojan_server_name: vpn-subdomain.example.net
+xray_trojan_certificate_path: /var/lib/marzban/certs/fullchain.pem
+xray_trojan_key_path: /var/lib/marzban/certs/key.pem
+
+xray_inbound_tcp_tag: VLESS TCP REALITY
+xray_inbound_grpc_tag: VLESS GRPC REALITY
+xray_inbound_xhttp_tag: VLESS XHTTP REALITY
+xray_inbound_trojan_tag: TROJAN TCP TLS
+
+xray_inbound_tcp_port: 443
+xray_inbound_grpc_port: 8443
+xray_inbound_xhttp_port: 2053
+xray_inbound_trojan_port: 9443
+
+xray_trojan_cipher_suites: >-
+  TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256:
+  TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256:
+  TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384:
+  TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384:
+  TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256:
+  TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+
+xray_reality_secret_specs:
+  - name: tcp
+    private_key_path: "{{ xray_reality_tcp_private_key_path }}"
+    short_id_path: "{{ xray_reality_tcp_short_id_path }}"
+  - name: grpc
+    private_key_path: "{{ xray_reality_grpc_private_key_path }}"
+    short_id_path: "{{ xray_reality_grpc_short_id_path }}"
+  - name: xhttp
+    private_key_path: "{{ xray_reality_xhttp_private_key_path }}"
+    short_id_path: "{{ xray_reality_xhttp_short_id_path }}"
