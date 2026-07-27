@@ -179,7 +179,7 @@
           {{
             tls_certificate_acme_certificates.stdout
             is search(
-              '(?m)^' ~ (tls_certificate_domain | regex_escape) ~ '\\s'
+              '(?m)^ *' ~ (tls_certificate_domain | regex_escape) ~ '(?: |$)'
             )
           }}
       no_log: true
