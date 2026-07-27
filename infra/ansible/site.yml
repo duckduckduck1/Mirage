@@ -64,8 +64,21 @@
         - core
         - xray
 
+    - role: tls_certificate
+      when: tls_certificate_enabled | bool
+      tags:
+        - certificate
+        - tls
+
     - role: xray_inbounds
       when: xray_inbounds_enabled | bool
       tags:
         - inbounds
         - xray
+
+    - role: caddy_subscription
+      when: caddy_subscription_enabled | bool
+      tags:
+        - caddy
+        - subscription
+        - https
