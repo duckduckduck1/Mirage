@@ -31,6 +31,7 @@ xray_reality_xhttp_target: xhttp-mask.example.net:443
 xray_reality_xhttp_server_name: xhttp-mask.example.net
 
 xray_reality_grpc_service_name: mirage-grpc
+xray_reality_xhttp_path: /mirage-xhttp
 xray_reality_spider_x: /
 
 xray_trojan_server_name: vpn-subdomain.example.net

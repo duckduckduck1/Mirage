@@ -67,6 +67,7 @@
         "/var/lib/marzban/certs/fullchain.pem"
       - xray_trojan_key_path == "/var/lib/marzban/certs/key.pem"
       - xray_reality_grpc_service_name is match('^[A-Za-z0-9._-]{1,64}$')
+      - xray_reality_xhttp_path is match('^/[A-Za-z0-9._~-]{1,128}$')
       - xray_reality_spider_x.startswith("/")
     fail_msg: >-
       Stage 4 requires the reviewed ports, three distinct REALITY targets,
@@ -438,6 +439,7 @@
           network: xhttp
           xhttpSettings:
             mode: auto
+            path: "{{ xray_reality_xhttp_path }}"
           security: reality
           realitySettings:
             show: false
