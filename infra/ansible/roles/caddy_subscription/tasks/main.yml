@@ -8,6 +8,7 @@
       - caddy_subscription_image == "caddy:2.11.4-alpine"
       - caddy_subscription_marzban_compose_file == "/opt/marzban/docker-compose.yml"
       - caddy_subscription_compose_file == "/opt/marzban/docker-compose.mirage-caddy.yml"
+      - caddy_subscription_compose_project == "mirage-caddy"
       - caddy_subscription_caddyfile == "/opt/marzban/Caddyfile"
       - caddy_subscription_socket_path == "/var/lib/marzban/marzban.socket"
       - caddy_subscription_certificate_path == tls_certificate_fullchain_path
@@ -180,17 +181,15 @@
   register: caddy_subscription_compose_setting
   no_log: true
 
-- name: Validate the combined Marzban and Caddy Compose configuration
+- name: Validate the dedicated Caddy Compose configuration
   ansible.builtin.command:
     argv:
       - docker
       - compose
       - -f
-      - "{{ caddy_subscription_marzban_compose_file }}"
-      - -f
       - "{{ caddy_subscription_compose_file }}"
       - -p
-      - marzban
+      - "{{ caddy_subscription_compose_project }}"
       - config
       - -q
   changed_when: false
@@ -214,20 +213,48 @@
     state: present
     timeout: 120
 
+- name: Inspect a legacy Caddy container in the Marzban Compose project
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ caddy_subscription_compose_file }}"
+      - -p
+      - marzban
+      - ps
+      - -q
+      - caddy
+  register: caddy_subscription_legacy_caddy
+  changed_when: false
+
+- name: Remove the legacy Caddy container from the Marzban Compose project
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ caddy_subscription_compose_file }}"
+      - -p
+      - marzban
+      - rm
+      - --stop
+      - --force
+      - caddy
+  when: caddy_subscription_legacy_caddy.stdout | trim | length > 0
+  changed_when: true
+
 - name: Start Caddy on the dedicated HTTPS port
   ansible.builtin.command:
     argv:
       - docker
       - compose
       - -f
-      - "{{ caddy_subscription_marzban_compose_file }}"
-      - -f
       - "{{ caddy_subscription_compose_file }}"
       - -p
-      - marzban
+      - "{{ caddy_subscription_compose_project }}"
       - up
       - -d
-      - --no-deps
       - caddy
   register: caddy_subscription_start
   changed_when: >-
@@ -244,11 +271,9 @@
       - docker
       - compose
       - -f
-      - "{{ caddy_subscription_marzban_compose_file }}"
-      - -f
       - "{{ caddy_subscription_compose_file }}"
       - -p
-      - marzban
+      - "{{ caddy_subscription_compose_project }}"
       - exec
       - -T
       - caddy
@@ -267,11 +292,9 @@
       - docker
       - compose
       - -f
-      - "{{ caddy_subscription_marzban_compose_file }}"
-      - -f
       - "{{ caddy_subscription_compose_file }}"
       - -p
-      - marzban
+      - "{{ caddy_subscription_compose_project }}"
       - exec
       - -T
       - caddy
@@ -322,11 +345,9 @@
       - docker
       - compose
       - -f
-      - "{{ caddy_subscription_marzban_compose_file }}"
-      - -f
       - "{{ caddy_subscription_compose_file }}"
       - -p
-      - marzban
+      - "{{ caddy_subscription_compose_project }}"
       - ps
       - --status
       - running

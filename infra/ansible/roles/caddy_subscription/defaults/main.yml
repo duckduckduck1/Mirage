@@ -6,6 +6,7 @@ caddy_subscription_image: caddy:2.11.4-alpine
 
 caddy_subscription_marzban_compose_file: /opt/marzban/docker-compose.yml
 caddy_subscription_compose_file: /opt/marzban/docker-compose.mirage-caddy.yml
+caddy_subscription_compose_project: mirage-caddy
 caddy_subscription_caddyfile: /opt/marzban/Caddyfile
 caddy_subscription_socket_path: /var/lib/marzban/marzban.socket
 caddy_subscription_certificate_path: /var/lib/marzban/certs/fullchain.pem

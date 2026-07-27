@@ -17,4 +17,4 @@ tls_acme_ca: letsencrypt
 
 tls_reload_command_path: /usr/local/sbin/mirage-tls-reload
 tls_reload_caddy_compose_file: /opt/marzban/docker-compose.mirage-caddy.yml
-tls_reload_marzban_compose_file: /opt/marzban/docker-compose.yml
+tls_reload_caddy_compose_project: mirage-caddy
