@@ -38,6 +38,11 @@ marzban_install_enabled: false
 marzban_version: v0.8.4
 marzban_acceptance_prompt: true
 
+# Временное исключение А-13: минимальный патч официального v0.8.4,
+# идентичный открытому upstream PR #2036. После официального релиза с
+# исправлением отключить и удалить согласно acceptance-ledger.
+marzban_a13_patch_enabled: true
+
 # Версия совпадает со штатным ядром Marzban v0.8.4 и меняется только после
 # полной проверки матрицы клиентов.
 xray_pin_enabled: false

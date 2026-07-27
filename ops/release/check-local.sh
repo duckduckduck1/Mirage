@@ -222,6 +222,7 @@ run_python -m unittest ops.admin.test_admin_api ops.xui.test_xui_api
 
 log "Python syntax"
 run_python -m py_compile \
+  infra/ansible/roles/marzban/files/apply-a13.py \
   ops/admin/admin_api.py \
   ops/admin/restore_helper.py \
   ops/xui/xui_api.py

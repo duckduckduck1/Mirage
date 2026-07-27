@@ -7,8 +7,29 @@
       - marzban_data_dir == "/var/lib/marzban"
       - marzban_socket_path is match('^/var/lib/marzban/[A-Za-z0-9._-]+$')
       - marzban_installer_url == "https://github.com/Gozargah/Marzban-scripts/raw/master/marzban.sh"
+      - >-
+        (not marzban_a13_patch_enabled) or
+        (marzban_version == "v0.8.4")
+      - >-
+        (not marzban_a13_patch_enabled) or
+        (marzban_a13_base_digest is match('^sha256:[0-9a-f]{64}$'))
+      - >-
+        (not marzban_a13_patch_enabled) or
+        (
+          marzban_a13_base_image ==
+          "gozargah/marzban@" ~ marzban_a13_base_digest
+        )
+      - >-
+        (not marzban_a13_patch_enabled) or
+        (
+          marzban_a13_image ==
+          "mirage/marzban:" ~ marzban_version ~ "-a13-pr2036"
+        )
+      - marzban_a13_patch_revision == "pr2036-941918a"
+      - marzban_a13_build_dir == "/opt/marzban/mirage-a13"
     fail_msg: >-
-      Use the documented Marzban paths, official installer and a pinned release.
+      Use the documented Marzban paths, official installer, pinned release and
+      the reviewed A-13 exception.
 
 - name: Inspect existing Marzban application directory
   ansible.builtin.stat:
@@ -120,7 +141,7 @@
         path: "{{ marzban_installer_path }}"
         state: absent
 
-- name: Pin the documented Marzban image release
+- name: Inspect the configured Marzban image
   ansible.builtin.command:
     argv:
       - docker
@@ -134,12 +155,113 @@
   register: marzban_compose_images
   changed_when: false
 
-- name: Confirm the configured Marzban release
+- name: Refuse an unreviewed Marzban image
   ansible.builtin.assert:
     that:
-      - marzban_compose_images.stdout_lines == ["gozargah/marzban:" ~ marzban_version]
+      - >-
+        marzban_compose_images.stdout_lines in
+        [["gozargah/marzban:" ~ marzban_version], [marzban_a13_image]]
     fail_msg: >-
-      The installed Compose file does not use the pinned Marzban release.
+      The installed Compose file does not use the pinned official release or
+      its reviewed A-13 derivative.
+
+- name: Build the reviewed A-13 Marzban derivative
+  when: marzban_a13_patch_enabled | bool
+  block:
+    - name: Create the A-13 image build directory
+      ansible.builtin.file:
+        path: "{{ marzban_a13_build_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install the A-13 Dockerfile
+      ansible.builtin.template:
+        src: Dockerfile.a13.j2
+        dest: "{{ marzban_a13_build_dir }}/Dockerfile"
+        owner: root
+        group: root
+        mode: "0644"
+      register: marzban_a13_dockerfile
+
+    - name: Install the reviewed A-13 patch
+      ansible.builtin.copy:
+        src: apply-a13.py
+        dest: "{{ marzban_a13_build_dir }}/apply-a13.py"
+        owner: root
+        group: root
+        mode: "0644"
+      register: marzban_a13_patch_file
+
+    - name: Inspect an existing A-13 image
+      ansible.builtin.command:
+        argv:
+          - docker
+          - image
+          - inspect
+          - "{{ marzban_a13_image }}"
+      register: marzban_a13_image_inspect
+      changed_when: false
+      failed_when: false
+
+    - name: Read existing A-13 image labels
+      ansible.builtin.set_fact:
+        marzban_a13_existing_labels: >-
+          {{
+            (
+              (marzban_a13_image_inspect.stdout | from_json | first).Config.Labels
+              | default({})
+            )
+            if marzban_a13_image_inspect.rc == 0
+            else {}
+          }}
+
+    - name: Determine whether the A-13 image must be rebuilt
+      ansible.builtin.set_fact:
+        marzban_a13_build_required: >-
+          {{
+            marzban_a13_image_inspect.rc != 0 or
+            marzban_a13_existing_labels.get(
+              "org.mirage.a13.base-digest", ""
+            ) != marzban_a13_base_digest or
+            marzban_a13_existing_labels.get(
+              "org.mirage.a13.patch-revision", ""
+            ) != marzban_a13_patch_revision or
+            marzban_a13_dockerfile.changed or
+            marzban_a13_patch_file.changed
+          }}
+
+    - name: Build the pinned Marzban image with the A-13 fix
+      ansible.builtin.command:
+        argv:
+          - docker
+          - build
+          - --tag
+          - "{{ marzban_a13_image }}"
+          - "{{ marzban_a13_build_dir }}"
+      when: marzban_a13_build_required | bool
+      register: marzban_a13_image_build
+      changed_when: true
+
+- name: Select the accepted Marzban image
+  ansible.builtin.set_fact:
+    marzban_effective_image: >-
+      {{
+        marzban_a13_image
+        if marzban_a13_patch_enabled
+        else "gozargah/marzban:" ~ marzban_version
+      }}
+
+- name: Configure the accepted Marzban image
+  ansible.builtin.lineinfile:
+    path: "{{ marzban_compose_file }}"
+    regexp: '^[ \t]+image:[ \t]+.*$'
+    line: "    image: {{ marzban_effective_image }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: marzban_image_setting
 
 - name: Configure Marzban Unix socket
   ansible.builtin.lineinfile:
@@ -181,6 +303,8 @@
       - restart
       - --no-logs
   when: >-
+    marzban_image_setting.changed or
+    (marzban_a13_image_build.changed | default(false)) or
     marzban_uds_setting.changed or
     marzban_docs_setting.changed or
     marzban_debug_setting.changed
@@ -211,12 +335,50 @@
       - /dev/null
   changed_when: false
 
+- name: Inspect the effective Marzban image
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ marzban_compose_file }}"
+      - -p
+      - marzban
+      - config
+      - --images
+  register: marzban_effective_compose_images
+  changed_when: false
+
+- name: Verify the active A-13 source fix
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ marzban_compose_file }}"
+      - -p
+      - marzban
+      - exec
+      - -T
+      - marzban
+      - python
+      - -c
+      - >-
+        from pathlib import Path;
+        source = Path("/code/app/subscription/share.py").read_text();
+        assert '\n                    host_inbound["sid"] = random.choice(sids)'
+        in source;
+        assert '\n                    inbound["sid"] = random.choice(sids)'
+        not in source
+  changed_when: false
+  when: marzban_a13_patch_enabled | bool
+
 - name: Confirm Marzban panel acceptance conditions
   ansible.builtin.assert:
     that:
       - marzban_socket_stat.stat.exists
       - marzban_socket_stat.stat.issock | default(false)
-      - marzban_compose_images.stdout_lines == ["gozargah/marzban:" ~ marzban_version]
+      - marzban_effective_compose_images.stdout_lines == [marzban_effective_image]
     fail_msg: "Marzban panel installation checks did not pass."
 
 - name: Pause for owner-created Marzban administrator and login check

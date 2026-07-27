@@ -1,0 +1,10 @@
+FROM {{ marzban_a13_base_image }}
+
+LABEL org.opencontainers.image.title="Marzban with temporary Mirage A-13 fix" \
+      org.opencontainers.image.source="https://github.com/Gozargah/Marzban/pull/2036" \
+      org.mirage.a13.base-digest="{{ marzban_a13_base_digest }}" \
+      org.mirage.a13.patch-revision="{{ marzban_a13_patch_revision }}"
+
+COPY apply-a13.py /tmp/mirage-apply-a13.py
+RUN python /tmp/mirage-apply-a13.py /code/app/subscription/share.py \
+    && rm /tmp/mirage-apply-a13.py
