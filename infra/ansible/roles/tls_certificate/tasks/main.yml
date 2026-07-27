@@ -178,7 +178,7 @@
         tls_certificate_acme_domain_registered: >-
           {{
             tls_certificate_acme_certificates.stdout
-            is regex(
+            is search(
               '(?m)^' ~ (tls_certificate_domain | regex_escape) ~ '\\s'
             )
           }}
