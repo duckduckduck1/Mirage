@@ -122,7 +122,10 @@
   until: >-
     duckdns_lookup.rc == 0 and
     duckdns_expected_ipv4 in
-    (duckdns_lookup.stdout_lines | map('split') | map('first') | list)
+    (
+      duckdns_lookup.stdout
+      | regex_findall('(?m)^([0-9.]+)\\s')
+    )
   no_log: true
 
 - name: Check DuckDNS timer state
