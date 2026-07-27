@@ -73,3 +73,9 @@ caddy_subscription_enabled: false
 caddy_subscription_domain: vpn-subdomain.example.net
 caddy_subscription_profile_title: Mirage
 caddy_subscription_update_interval_hours: 12
+
+# Этап 6: токен и ID должны находиться только в отдельных root-only файлах на
+# VPS. В репозитории и group_vars/all.yml секреты не хранятся.
+telegram_bot_enabled: false
+telegram_bot_token_file: /etc/mirage/secrets/telegram_bot_token
+telegram_bot_admin_id_file: /etc/mirage/secrets/telegram_admin_id
