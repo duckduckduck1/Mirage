@@ -15,6 +15,17 @@ audit remains outside Git in `PLAN.md`.
 - MVP user support is Hiddify and Karing for TCP REALITY, gRPC REALITY, and
   Trojan TLS. XHTTP remains server-validated only.
 
+## Release-candidate acceptance — 2026-07-28
+
+- The production host was rebooted. Docker, Marzban, Caddy, the panel socket,
+  certificate, dynamic-DNS timer and native backup schedule recovered
+  automatically.
+- A fresh native backup was delivered successfully after the reboot.
+- The owner confirmed the Telegram bot and supported client traffic still work.
+- SSH hardening was applied through the repository role with its timed rollback.
+  A separate public-key session succeeded before confirmation; effective SSH
+  settings now prohibit password and root login.
+
 ## Evidence policy
 
 Every future entry records the date, tested component versions, non-sensitive
