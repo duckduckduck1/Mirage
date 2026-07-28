@@ -1,0 +1,26 @@
+---
+marzban_install_enabled: false
+marzban_version: v0.8.4
+marzban_acceptance_prompt: true
+
+marzban_a13_patch_enabled: true
+marzban_a13_base_digest: >-
+  sha256:8e422c21997e5d2e3fa231eeff73c0a19193c20fc02fa4958e9368abb9623b8d
+marzban_a13_base_image: >-
+  gozargah/marzban@{{ marzban_a13_base_digest }}
+marzban_a13_image: "mirage/marzban:{{ marzban_version }}-a13-pr2036"
+marzban_a13_patch_revision: pr2036-941918a
+marzban_a13_build_dir: "{{ marzban_app_dir }}/mirage-a13"
+
+marzban_app_dir: /opt/marzban
+marzban_data_dir: /var/lib/marzban
+marzban_compose_file: "{{ marzban_app_dir }}/docker-compose.yml"
+marzban_environment_file: "{{ marzban_app_dir }}/.env"
+marzban_socket_path: "{{ marzban_data_dir }}/marzban.socket"
+
+marzban_installer_url: >-
+  https://github.com/Gozargah/Marzban-scripts/raw/master/marzban.sh
+marzban_installer_path: /run/mirage-marzban-installer
+marzban_installer_unit: mirage-marzban-install
+marzban_install_retries: 120
+marzban_install_delay: 5

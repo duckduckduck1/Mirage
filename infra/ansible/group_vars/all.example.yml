@@ -8,8 +8,79 @@ admin_public_key_file: /root/.ssh/mirage_ed25519.pub
 allowed_tcp_ports:
   - 22
   - 443
+  - 2053
+  - 2096
+  - 8443
+  - 9443
 
-revoked_tcp_ports: []
+revoked_tcp_ports:
+  - 80
+  - 8388
 
-# Оставь false для первого запуска. Включай только после проверки входа по ключу.
-enable_ssh_hardening: false
+# Сценарий чистого VPS: только на новом Ubuntu 22.04 без Docker и данных
+# контейнеров. Для уже подготовленного VPS оставь false: роль Marzban сама
+# проверит наличие Docker Compose и откажется заменять чужую установку.
+docker_engine_install_enabled: false
+
+# Роль ставит rollback-таймер. После проверки нового key-only сеанса выполни
+# sudo /usr/local/sbin/mirage-ssh-confirm
+enable_ssh_hardening: true
+
+mirage_mtu: 1400
+mirage_swappiness: 10
+mirage_default_qdisc: fq
+mirage_congestion_control: bbr
+
+# Динамический DNS включается только после размещения токена на целевом VPS.
+# Настоящее имя и токен остаются вне Git.
+dynamic_dns_enabled: false
+duckdns_fqdn: vpn-subdomain.duckdns.org
+duckdns_token_file: /etc/mirage/secrets/duckdns_token
+
+# Панель ставится отдельным запуском после подтверждения SSH-hardening.
+# Администратора владелец создаёт лично через штатный Marzban CLI.
+marzban_install_enabled: false
+marzban_version: v0.8.4
+marzban_acceptance_prompt: true
+
+# Временное исключение А-13: минимальный патч официального v0.8.4,
+# идентичный открытому upstream PR #2036. После официального релиза с
+# исправлением отключить и удалить согласно acceptance-ledger.
+marzban_a13_patch_enabled: true
+
+# Версия совпадает со штатным ядром Marzban v0.8.4 и меняется только после
+# полной проверки матрицы клиентов.
+xray_pin_enabled: false
+xray_version: v24.12.31
+
+# Этап 4 включается только после выбора трёх разных REALITY target-доменов
+# по требованиям PLAN.md и размещения общего TLS-сертификата для Trojan.
+xray_inbounds_enabled: false
+xray_inbounds_targets_owner_reviewed: false
+xray_reality_tcp_target: tcp-mask.example.net:443
+xray_reality_tcp_server_name: tcp-mask.example.net
+xray_reality_grpc_target: grpc-mask.example.net:443
+xray_reality_grpc_server_name: grpc-mask.example.net
+xray_reality_xhttp_target: xhttp-mask.example.net:443
+xray_reality_xhttp_server_name: xhttp-mask.example.net
+xray_trojan_server_name: vpn-subdomain.example.net
+
+# А-14: сертификат выпускается перед включением Trojan. Укажи root-only файл
+# с контактным адресом ACME и включи роль только в подтверждённое окно.
+tls_certificate_enabled: false
+tls_certificate_issue_enabled: true
+tls_certificate_domain: vpn-subdomain.example.net
+tls_certificate_email_file: /etc/mirage/secrets/acme_email
+
+# HTTPS-панель и подписки на отдельном порту. Путь подписки генерируется на
+# сервере один раз и не хранится в Git.
+caddy_subscription_enabled: false
+caddy_subscription_domain: vpn-subdomain.example.net
+caddy_subscription_profile_title: Mirage
+caddy_subscription_update_interval_hours: 12
+
+# Этап 6: токен и ID должны находиться только в отдельных root-only файлах на
+# VPS. В репозитории и group_vars/all.yml секреты не хранятся.
+telegram_bot_enabled: false
+telegram_bot_token_file: /etc/mirage/secrets/telegram_bot_token
+telegram_bot_admin_id_file: /etc/mirage/secrets/telegram_admin_id

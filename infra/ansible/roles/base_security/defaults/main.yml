@@ -9,8 +9,14 @@ base_packages:
 allowed_tcp_ports:
   - 22
   - 443
+  - 2053
+  - 2096
+  - 8443
+  - 9443
 
-revoked_tcp_ports: []
+revoked_tcp_ports:
+  - 80
+  - 8388
 
 enable_ufw: true
 enable_fail2ban: true

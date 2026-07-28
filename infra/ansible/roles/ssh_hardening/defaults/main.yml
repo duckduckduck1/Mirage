@@ -1,13 +1,14 @@
 ---
-enable_ssh_hardening: false
+enable_ssh_hardening: true
 
 ssh_hardening_config_path: /etc/ssh/sshd_config.d/01-mirage-hardening.conf
 ssh_legacy_hardening_config_path: /etc/ssh/sshd_config.d/99-mirage-hardening.conf
-ssh_permit_root_login: prohibit-password
+ssh_permit_root_login: "no"
 
 ssh_rollback_script_path: /usr/local/sbin/mirage-ssh-rollback.sh
+ssh_confirm_script_path: /usr/local/sbin/mirage-ssh-confirm
 ssh_rollback_unit_name: mirage-ssh-rollback
-ssh_rollback_delay: 5min
+ssh_rollback_delay: 10min
 ssh_rollback_enabled: true
 
 mirage_backup_root: /root/mirage-backups

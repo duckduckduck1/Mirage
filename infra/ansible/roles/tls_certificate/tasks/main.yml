@@ -1,0 +1,323 @@
+---
+- name: Validate TLS certificate settings
+  ansible.builtin.assert:
+    that:
+      - tls_certificate_enabled | bool
+      - tls_certificate_directory == "/var/lib/marzban/certs"
+      - tls_certificate_fullchain_path == "/var/lib/marzban/certs/fullchain.pem"
+      - tls_certificate_key_path == "/var/lib/marzban/certs/key.pem"
+      - tls_certificate_email_file is match('^/')
+      - tls_certificate_duckdns_token_file is match('^/')
+      - tls_acme_home == "/root/.acme.sh"
+      - tls_acme_executable == "/root/.acme.sh/acme.sh"
+      - tls_acme_install_url == "https://get.acme.sh"
+      - tls_acme_ca == "letsencrypt"
+      - >-
+        (not tls_certificate_issue_enabled | bool) or
+        (
+          dynamic_dns_enabled | bool and
+          tls_certificate_domain == duckdns_fqdn and
+          tls_certificate_domain is match(
+            '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.duckdns\\.org$'
+          )
+        )
+      - >-
+        (not tls_certificate_issue_enabled | bool) or
+        (tls_certificate_domain | length > 0)
+    fail_msg: >-
+      TLS issuance requires the reviewed DuckDNS name, enabled dynamic DNS and
+      the documented Marzban certificate paths. Local acceptance may set
+      tls_certificate_issue_enabled to false only with a pre-created test cert.
+  no_log: true
+
+- name: Install ACME runtime packages
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - cron
+      - curl
+      - openssl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable the ACME renewal scheduler
+  ansible.builtin.service:
+    name: cron
+    state: started
+    enabled: true
+
+- name: Create the Marzban certificate directory
+  ansible.builtin.file:
+    path: "{{ tls_certificate_directory }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install the root-only TLS reload command
+  ansible.builtin.template:
+    src: mirage-tls-reload.j2
+    dest: "{{ tls_reload_command_path }}"
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Issue and install the common DNS-01 certificate
+  when: tls_certificate_issue_enabled | bool
+  block:
+    - name: Inspect ACME contact and DuckDNS token files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ tls_certificate_email_file }}"
+        - "{{ tls_certificate_duckdns_token_file }}"
+      register: tls_certificate_secret_file_stats
+      no_log: true
+
+    - name: Require root-only ACME contact and DuckDNS token files
+      ansible.builtin.assert:
+        that:
+          - tls_certificate_secret_file_stats.results | length == 2
+          - >-
+            tls_certificate_secret_file_stats.results
+            | map(attribute="stat.exists") | min
+          - >-
+            tls_certificate_secret_file_stats.results
+            | map(attribute="stat.isreg") | min
+          - >-
+            tls_certificate_secret_file_stats.results
+            | map(attribute="stat.pw_name") | list == ["root", "root"]
+          - >-
+            tls_certificate_secret_file_stats.results
+            | map(attribute="stat.gr_name") | list == ["root", "root"]
+          - >-
+            tls_certificate_secret_file_stats.results
+            | map(attribute="stat.mode") | list == ["0600", "0600"]
+        fail_msg: >-
+          Place the ACME contact address and DuckDNS token in separate root-only
+          files before enabling certificate issuance.
+      no_log: true
+
+    - name: Read the ACME contact and DuckDNS token
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      loop:
+        - "{{ tls_certificate_email_file }}"
+        - "{{ tls_certificate_duckdns_token_file }}"
+      register: tls_certificate_secret_files
+      no_log: true
+
+    - name: Assemble root-only ACME credentials
+      ansible.builtin.set_fact:
+        tls_certificate_acme_email: >-
+          {{ tls_certificate_secret_files.results[0].content | b64decode | trim }}
+        tls_certificate_duckdns_token: >-
+          {{ tls_certificate_secret_files.results[1].content | b64decode | trim }}
+      no_log: true
+
+    - name: Validate ACME contact and DuckDNS token values
+      ansible.builtin.assert:
+        that:
+          - tls_certificate_acme_email is match('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$')
+          - tls_certificate_duckdns_token is match('^[0-9a-fA-F-]{32,64}$')
+        fail_msg: "The ACME contact address or DuckDNS token is malformed."
+      no_log: true
+
+    - name: Inspect the official ACME client
+      ansible.builtin.stat:
+        path: "{{ tls_acme_executable }}"
+      register: tls_acme_executable_stat
+      no_log: true
+
+    - name: Install the official ACME client
+      ansible.builtin.shell:
+        cmd: >-
+          curl --fail --silent --show-error {{ tls_acme_install_url | quote }}
+          | sh -s email={{ tls_certificate_acme_email | quote }}
+        creates: "{{ tls_acme_executable }}"
+        executable: /bin/sh
+      register: tls_acme_install
+      no_log: true
+
+    - name: Set Let's Encrypt as the ACME certificate authority
+      ansible.builtin.command:
+        argv:
+          - "{{ tls_acme_executable }}"
+          - --set-default-ca
+          - --server
+          - "{{ tls_acme_ca }}"
+      changed_when: false
+      no_log: true
+
+    - name: Inspect the installed common certificate
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ tls_certificate_fullchain_path }}"
+        - "{{ tls_certificate_key_path }}"
+      register: tls_certificate_installed_stats
+      no_log: true
+
+    - name: Inspect registered ACME certificates
+      ansible.builtin.command:
+        argv:
+          - "{{ tls_acme_executable }}"
+          - --list
+      register: tls_certificate_acme_certificates
+      changed_when: false
+      no_log: true
+
+    - name: Assemble ACME certificate state
+      ansible.builtin.set_fact:
+        tls_certificate_paths_ready: >-
+          {{
+            tls_certificate_installed_stats.results
+            | map(attribute="stat.exists") | min | bool
+          }}
+        tls_certificate_acme_domain_registered: >-
+          {{
+            tls_certificate_acme_certificates.stdout
+            is search(
+              '(?m)^ *' ~ (tls_certificate_domain | regex_escape) ~ '(?: |$)'
+            )
+          }}
+      no_log: true
+
+    - name: Refuse an untracked or partial common certificate
+      ansible.builtin.assert:
+        that:
+          - >-
+            tls_certificate_installed_stats.results[0].stat.exists ==
+            tls_certificate_installed_stats.results[1].stat.exists
+          - >-
+            (not tls_certificate_paths_ready) or
+            tls_certificate_acme_domain_registered
+        fail_msg: >-
+          The common certificate is partial or not managed by this ACME client.
+          Move it aside before enabling DNS-01 issuance.
+      no_log: true
+
+    - name: Issue the common certificate through DuckDNS DNS-01
+      ansible.builtin.command:
+        argv:
+          - "{{ tls_acme_executable }}"
+          - --issue
+          - --server
+          - "{{ tls_acme_ca }}"
+          - --dns
+          - dns_duckdns
+          - -d
+          - "{{ tls_certificate_domain }}"
+          - --keylength
+          - ec-256
+      environment:
+        DuckDNS_Token: "{{ tls_certificate_duckdns_token }}"
+      when: not tls_certificate_acme_domain_registered
+      register: tls_certificate_issue
+      changed_when: true
+      no_log: true
+
+    - name: Install the common certificate for Marzban, Caddy and Trojan
+      ansible.builtin.command:
+        argv:
+          - "{{ tls_acme_executable }}"
+          - --install-cert
+          - -d
+          - "{{ tls_certificate_domain }}"
+          - --ecc
+          - --key-file
+          - "{{ tls_certificate_key_path }}"
+          - --fullchain-file
+          - "{{ tls_certificate_fullchain_path }}"
+          - --reloadcmd
+          - "{{ tls_reload_command_path }}"
+      when: >-
+        (tls_certificate_issue.changed | default(false)) or
+        not tls_certificate_paths_ready
+      changed_when: true
+      no_log: true
+
+- name: Inspect the common certificate and private key
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: true
+  loop:
+    - "{{ tls_certificate_fullchain_path }}"
+    - "{{ tls_certificate_key_path }}"
+  register: tls_certificate_final_stats
+
+- name: Require the common certificate and private key
+  ansible.builtin.assert:
+    that:
+      - tls_certificate_final_stats.results | length == 2
+      - tls_certificate_final_stats.results[0].stat.exists
+      - tls_certificate_final_stats.results[0].stat.isreg | default(false)
+      - tls_certificate_final_stats.results[1].stat.exists
+      - tls_certificate_final_stats.results[1].stat.isreg | default(false)
+    fail_msg: >-
+      The common certificate and private key must exist before Trojan and Caddy
+      can be enabled.
+  no_log: true
+
+- name: Set common certificate permissions
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: file
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ tls_certificate_fullchain_path }}"
+      mode: "0644"
+    - path: "{{ tls_certificate_key_path }}"
+      mode: "0600"
+  no_log: true
+
+- name: Validate the common certificate name and validity
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "{{ tls_certificate_fullchain_path }}"
+      - -checkhost
+      - "{{ tls_certificate_domain }}"
+      - -checkend
+      - "0"
+      - -noout
+  changed_when: false
+  no_log: true
+
+- name: Validate the common certificate private key
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - pkey
+      - -in
+      - "{{ tls_certificate_key_path }}"
+      - -noout
+  changed_when: false
+  no_log: true
+
+- name: Verify the ACME renewal registration
+  ansible.builtin.command:
+    argv:
+      - crontab
+      - -l
+  register: tls_certificate_crontab
+  changed_when: false
+  failed_when: >-
+    tls_certificate_issue_enabled | bool and
+    tls_certificate_crontab.rc != 0
+  when: tls_certificate_issue_enabled | bool
+  no_log: true
+
+- name: Confirm TLS certificate acceptance conditions
+  ansible.builtin.assert:
+    that:
+      - >-
+        (not tls_certificate_issue_enabled | bool) or
+        ('acme.sh --cron' in tls_certificate_crontab.stdout)
+    fail_msg: "ACME automatic renewal is not registered for the common certificate."
+  no_log: true

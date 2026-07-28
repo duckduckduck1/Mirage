@@ -1,0 +1,28 @@
+---
+# Сценарий для VPS, на котором Docker Compose уже установлен и принят
+# владельцем. Он не обновляет Docker и не меняет чужие Docker-объекты.
+- name: Confirm Docker Compose on a prepared VPS
+  hosts: mirage_vps
+  gather_facts: true
+
+  pre_tasks:
+    - name: Confirm that the prepared-VPS playbook runs locally as root
+      ansible.builtin.assert:
+        that:
+          - ansible_connection == "local"
+          - ansible_user_id == "root"
+        fail_msg: >-
+          Run this playbook from a root session on the VPS using the local
+          inventory.
+
+    - name: Require Docker Compose without changing Docker
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - version
+      changed_when: false
+
+- import_playbook: ../site.yml
+  vars:
+    docker_engine_install_enabled: false

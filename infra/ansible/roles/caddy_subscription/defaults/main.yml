@@ -1,0 +1,18 @@
+---
+caddy_subscription_enabled: false
+caddy_subscription_domain: ""
+caddy_subscription_external_port: 2096
+caddy_subscription_image: caddy:2.11.4-alpine
+
+caddy_subscription_marzban_compose_file: /opt/marzban/docker-compose.yml
+caddy_subscription_compose_file: /opt/marzban/docker-compose.mirage-caddy.yml
+caddy_subscription_compose_project: mirage-caddy
+caddy_subscription_caddyfile: /opt/marzban/Caddyfile
+caddy_subscription_socket_path: /var/lib/marzban/marzban.socket
+caddy_subscription_certificate_path: /var/lib/marzban/certs/fullchain.pem
+caddy_subscription_key_path: /var/lib/marzban/certs/key.pem
+
+caddy_subscription_path_file: /etc/mirage/secrets/subscription_path
+caddy_subscription_profile_title: Mirage
+caddy_subscription_update_interval_hours: 12
+caddy_subscription_verify_ca_file: ""

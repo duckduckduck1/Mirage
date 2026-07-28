@@ -1,0 +1,7 @@
+---
+telegram_bot_enabled: false
+telegram_bot_token_file: /etc/mirage/secrets/telegram_bot_token
+telegram_bot_admin_id_file: /etc/mirage/secrets/telegram_admin_id
+telegram_bot_environment_file: /opt/marzban/.env
+telegram_bot_socket_path: /var/lib/marzban/marzban.socket
+telegram_bot_restart_timeout: 60

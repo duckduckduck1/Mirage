@@ -1,0 +1,125 @@
+---
+- name: Validate Telegram bot settings
+  ansible.builtin.assert:
+    that:
+      - telegram_bot_enabled | bool
+      - telegram_bot_token_file is match('^/')
+      - telegram_bot_admin_id_file is match('^/')
+      - telegram_bot_environment_file == "/opt/marzban/.env"
+      - telegram_bot_socket_path == "/var/lib/marzban/marzban.socket"
+      - telegram_bot_restart_timeout | int >= 10
+      - telegram_bot_restart_timeout | int <= 300
+    fail_msg: >-
+      Enable the Telegram bot only with absolute root-only secret-file paths
+      and the reviewed Marzban environment and Unix-socket paths.
+  no_log: true
+
+- name: Inspect Telegram bot secret files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ telegram_bot_token_file }}"
+    - "{{ telegram_bot_admin_id_file }}"
+  register: telegram_bot_secret_stats
+  no_log: true
+
+- name: Require root-only Telegram bot secret files
+  ansible.builtin.assert:
+    that:
+      - telegram_bot_secret_stats.results | length == 2
+      - telegram_bot_secret_stats.results[0].stat.exists
+      - telegram_bot_secret_stats.results[0].stat.isreg | default(false)
+      - telegram_bot_secret_stats.results[0].stat.pw_name | default("") == "root"
+      - telegram_bot_secret_stats.results[0].stat.gr_name | default("") == "root"
+      - telegram_bot_secret_stats.results[0].stat.mode | default("") == "0600"
+      - telegram_bot_secret_stats.results[1].stat.exists
+      - telegram_bot_secret_stats.results[1].stat.isreg | default(false)
+      - telegram_bot_secret_stats.results[1].stat.pw_name | default("") == "root"
+      - telegram_bot_secret_stats.results[1].stat.gr_name | default("") == "root"
+      - telegram_bot_secret_stats.results[1].stat.mode | default("") == "0600"
+    fail_msg: >-
+      Place the Telegram bot token and the authorized Telegram ID in separate
+      root:root 0600 files before enabling this role.
+  no_log: true
+
+- name: Read Telegram bot secret files
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  loop:
+    - "{{ telegram_bot_token_file }}"
+    - "{{ telegram_bot_admin_id_file }}"
+  register: telegram_bot_secret_files
+  no_log: true
+
+- name: Assemble Telegram bot secret values
+  ansible.builtin.set_fact:
+    telegram_bot_token: >-
+      {{ telegram_bot_secret_files.results[0].content | b64decode | trim }}
+    telegram_bot_admin_id: >-
+      {{ telegram_bot_secret_files.results[1].content | b64decode | trim }}
+  no_log: true
+
+- name: Validate Telegram bot secret formats
+  ansible.builtin.assert:
+    that:
+      - telegram_bot_token is match('^[0-9]{6,20}:[A-Za-z0-9_-]{20,}$')
+      - telegram_bot_admin_id is match('^-?[0-9]{5,20}$')
+    fail_msg: "The Telegram bot token or administrator ID is malformed."
+  no_log: true
+
+- name: Configure the Telegram bot token
+  ansible.builtin.lineinfile:
+    path: "{{ telegram_bot_environment_file }}"
+    regexp: '^#?[ \t]*TELEGRAM_API_TOKEN[ \t]*[:=].*$'
+    line: 'TELEGRAM_API_TOKEN = "{{ telegram_bot_token }}"'
+    owner: root
+    group: root
+    mode: "0600"
+  register: telegram_bot_token_setting
+  no_log: true
+
+- name: Configure the authorized Telegram administrator
+  ansible.builtin.lineinfile:
+    path: "{{ telegram_bot_environment_file }}"
+    regexp: '^#?[ \t]*TELEGRAM_ADMIN_ID[ \t]*[:=].*$'
+    line: 'TELEGRAM_ADMIN_ID = "{{ telegram_bot_admin_id }}"'
+    owner: root
+    group: root
+    mode: "0600"
+  register: telegram_bot_admin_setting
+  no_log: true
+
+- name: Restart Marzban after Telegram bot configuration
+  ansible.builtin.command:
+    argv:
+      - marzban
+      - restart
+      - --no-logs
+  when: telegram_bot_token_setting.changed or telegram_bot_admin_setting.changed
+  no_log: true
+
+- name: Wait for Marzban after Telegram bot configuration
+  ansible.builtin.wait_for:
+    path: "{{ telegram_bot_socket_path }}"
+    state: present
+    timeout: "{{ telegram_bot_restart_timeout }}"
+  when: telegram_bot_token_setting.changed or telegram_bot_admin_setting.changed
+
+- name: Verify the Telegram bot token with Telegram
+  ansible.builtin.uri:
+    url: "https://api.telegram.org/bot{{ telegram_bot_token }}/getMe"
+    method: GET
+    return_content: true
+    status_code: 200
+    validate_certs: true
+    timeout: 30
+  register: telegram_bot_get_me
+  changed_when: false
+  no_log: true
+
+- name: Confirm Telegram bot token acceptance conditions
+  ansible.builtin.assert:
+    that:
+      - telegram_bot_get_me.json.ok | default(false) | bool
+    fail_msg: "Telegram rejected the configured bot token."
+  no_log: true

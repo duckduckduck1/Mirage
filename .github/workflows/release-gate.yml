@@ -1,4 +1,4 @@
-name: Release gate
+name: Mirage v2 release gate
 
 on:
   workflow_dispatch:
@@ -11,36 +11,34 @@ on:
       - dev
       - main
     tags:
-      - "v0.1*"
+      - "v2.*"
 
 permissions:
   contents: read
 
 jobs:
-  v0-1:
-    name: v0.1 checks
+  checks:
+    name: Repository checks
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
+      - name: Install Ansible validation tools
+        run: python -m pip install ansible-core==2.19.7 yamllint==1.37.1
+
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
-
-      - name: Show tool versions
-        run: |
-          python --version
-          node --version
-          docker compose version
+          cache: npm
 
       - name: Run release gate
         run: bash ops/release/check-local.sh

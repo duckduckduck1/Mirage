@@ -35,8 +35,63 @@
         - bootstrap
         - security
 
+    - role: docker_engine
+      when: docker_engine_install_enabled | bool
+      tags:
+        - bootstrap
+        - docker
+        - docker-engine
+
+    - role: network_tuning
+      tags:
+        - bootstrap
+        - network
+
+    - role: dynamic_dns
+      when: dynamic_dns_enabled | bool
+      tags:
+        - dns
+        - dynamic-dns
+
     - role: ssh_hardening
       when: enable_ssh_hardening | bool
       tags:
         - hardening
         - ssh
+
+    - role: marzban
+      when: marzban_install_enabled | bool
+      tags:
+        - panel
+        - marzban
+
+    - role: xray_core
+      when: xray_pin_enabled | bool
+      tags:
+        - core
+        - xray
+
+    - role: tls_certificate
+      when: tls_certificate_enabled | bool
+      tags:
+        - certificate
+        - tls
+
+    - role: xray_inbounds
+      when: xray_inbounds_enabled | bool
+      tags:
+        - inbounds
+        - xray
+
+    - role: caddy_subscription
+      when: caddy_subscription_enabled | bool
+      tags:
+        - caddy
+        - subscription
+        - https
+
+    - role: telegram_bot
+      when: telegram_bot_enabled | bool
+      tags:
+        - telegram
+        - telegram-bot

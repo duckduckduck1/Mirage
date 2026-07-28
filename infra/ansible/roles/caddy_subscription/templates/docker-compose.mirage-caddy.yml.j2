@@ -1,0 +1,15 @@
+services:
+  caddy:
+    image: {{ caddy_subscription_image }}
+    restart: always
+    ports:
+      - "{{ caddy_subscription_external_port }}:443"
+    volumes:
+      - /var/lib/marzban:/var/lib/marzban:ro
+      - {{ caddy_subscription_caddyfile }}:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

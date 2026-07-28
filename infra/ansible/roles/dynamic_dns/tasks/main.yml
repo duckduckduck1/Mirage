@@ -1,0 +1,145 @@
+---
+- name: Validate DuckDNS inputs
+  ansible.builtin.assert:
+    that:
+      - duckdns_fqdn is match('^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.duckdns\\.org$')
+      - duckdns_token_file is match('^/')
+      - duckdns_expected_ipv4 is match('^[0-9]{1,3}(?:\\.[0-9]{1,3}){3}$')
+    fail_msg: >-
+      Define a valid DuckDNS FQDN, an absolute token-file path and the expected
+      IPv4 address in untracked host variables.
+  no_log: true
+
+- name: Install dynamic DNS runtime packages
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - dnsutils
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create Mirage configuration directory
+  ansible.builtin.file:
+    path: /etc/mirage
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Create Mirage secrets directory
+  ansible.builtin.file:
+    path: /etc/mirage/secrets
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Inspect DuckDNS token file
+  ansible.builtin.stat:
+    path: "{{ duckdns_token_file }}"
+  register: duckdns_token_file_stat
+  no_log: true
+
+- name: Require a root-only DuckDNS token file
+  ansible.builtin.assert:
+    that:
+      - duckdns_token_file_stat.stat.exists
+      - duckdns_token_file_stat.stat.isreg | default(false)
+      - duckdns_token_file_stat.stat.pw_name | default("") == "root"
+      - duckdns_token_file_stat.stat.gr_name | default("") == "root"
+      - duckdns_token_file_stat.stat.mode | default("") == "0600"
+    fail_msg: >-
+      Place the DuckDNS token in the configured file and set owner root:root
+      with mode 0600 before enabling dynamic DNS.
+  no_log: true
+
+- name: Install root-only dynamic DNS environment
+  ansible.builtin.copy:
+    dest: "{{ duckdns_environment_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      DUCKDNS_FQDN={{ duckdns_fqdn }}
+      DUCKDNS_CREDENTIAL_FILE={{ duckdns_token_file }}
+  no_log: true
+  notify: Reload dynamic DNS units
+
+- name: Install DuckDNS update script
+  ansible.builtin.template:
+    src: mirage-duckdns-update.j2
+    dest: "{{ duckdns_update_script }}"
+    owner: root
+    group: root
+    mode: "0750"
+  notify: Reload dynamic DNS units
+
+- name: Install DuckDNS systemd service
+  ansible.builtin.template:
+    src: mirage-duckdns-update.service.j2
+    dest: /etc/systemd/system/mirage-duckdns-update.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload dynamic DNS units
+
+- name: Install DuckDNS systemd timer
+  ansible.builtin.template:
+    src: mirage-duckdns-update.timer.j2
+    dest: /etc/systemd/system/mirage-duckdns-update.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload dynamic DNS units
+
+- name: Apply pending dynamic DNS unit changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable DuckDNS update timer
+  ansible.builtin.systemd:
+    name: mirage-duckdns-update.timer
+    state: started
+    enabled: true
+
+- name: Run initial DuckDNS update
+  ansible.builtin.systemd:
+    name: mirage-duckdns-update.service
+    state: started
+  no_log: true
+
+- name: Resolve DuckDNS name after update
+  ansible.builtin.command:
+    argv:
+      - getent
+      - ahostsv4
+      - "{{ duckdns_fqdn }}"
+  register: duckdns_lookup
+  changed_when: false
+  retries: "{{ duckdns_dns_check_retries }}"
+  delay: "{{ duckdns_dns_check_delay }}"
+  until: >-
+    duckdns_lookup.rc == 0 and
+    duckdns_expected_ipv4 in
+    (
+      duckdns_lookup.stdout
+      | regex_findall('(?m)^([0-9.]+)\\s')
+    )
+  no_log: true
+
+- name: Check DuckDNS timer state
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-enabled
+      - mirage-duckdns-update.timer
+  register: duckdns_timer_enabled
+  changed_when: false
+
+- name: Confirm dynamic DNS acceptance conditions
+  ansible.builtin.assert:
+    that:
+      - duckdns_timer_enabled.stdout == "enabled"
+      - duckdns_lookup.rc == 0
+    fail_msg: "Dynamic DNS acceptance checks did not pass."

@@ -1,0 +1,6 @@
+---
+# Полный сценарий для нового Ubuntu 22.04 VPS без Docker. Параметры Mirage
+# берутся из внешнего group_vars/all.yml и никогда не коммитятся.
+- import_playbook: ../site.yml
+  vars:
+    docker_engine_install_enabled: true

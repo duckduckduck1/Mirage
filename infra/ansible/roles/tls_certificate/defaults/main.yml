@@ -1,0 +1,20 @@
+---
+tls_certificate_enabled: false
+tls_certificate_issue_enabled: true
+
+tls_certificate_domain: ""
+tls_certificate_email_file: /etc/mirage/secrets/acme_email
+tls_certificate_duckdns_token_file: /etc/mirage/secrets/duckdns_token
+
+tls_certificate_directory: /var/lib/marzban/certs
+tls_certificate_fullchain_path: "{{ tls_certificate_directory }}/fullchain.pem"
+tls_certificate_key_path: "{{ tls_certificate_directory }}/key.pem"
+
+tls_acme_home: /root/.acme.sh
+tls_acme_executable: "{{ tls_acme_home }}/acme.sh"
+tls_acme_install_url: https://get.acme.sh
+tls_acme_ca: letsencrypt
+
+tls_reload_command_path: /usr/local/sbin/mirage-tls-reload
+tls_reload_caddy_compose_file: /opt/marzban/docker-compose.mirage-caddy.yml
+tls_reload_caddy_compose_project: mirage-caddy

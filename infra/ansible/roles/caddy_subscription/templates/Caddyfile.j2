@@ -1,0 +1,4 @@
+https://{{ caddy_subscription_domain }} {
+	tls {{ caddy_subscription_certificate_path }} {{ caddy_subscription_key_path }}
+	reverse_proxy unix//{{ caddy_subscription_socket_path | regex_replace('^/', '') }}
+}

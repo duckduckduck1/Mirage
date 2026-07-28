@@ -83,6 +83,14 @@
     group: root
     mode: "0700"
 
+- name: Install SSH hardening confirmation command
+  ansible.builtin.template:
+    src: mirage-ssh-confirm.j2
+    dest: "{{ ssh_confirm_script_path }}"
+    owner: root
+    group: root
+    mode: "0700"
+
 - name: Stop previous SSH rollback timer if present
   ansible.builtin.command:
     argv:
@@ -135,3 +143,20 @@
       ansible.builtin.service:
         name: sshd
         state: reloaded
+
+- name: Read effective SSH configuration
+  ansible.builtin.command:
+    cmd: /usr/sbin/sshd -T
+  register: sshd_effective_config
+  changed_when: false
+
+- name: Confirm effective SSH hardening
+  ansible.builtin.assert:
+    that:
+      - "'passwordauthentication no' in sshd_effective_config.stdout_lines"
+      - "'kbdinteractiveauthentication no' in sshd_effective_config.stdout_lines"
+      - "'pubkeyauthentication yes' in sshd_effective_config.stdout_lines"
+      - "'permitrootlogin no' in sshd_effective_config.stdout_lines"
+    fail_msg: >-
+      sshd accepted the configuration but its effective settings are not
+      key-only with root login disabled. The scheduled rollback remains active.

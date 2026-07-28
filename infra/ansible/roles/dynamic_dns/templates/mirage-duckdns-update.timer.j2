@@ -1,0 +1,12 @@
+[Unit]
+Description=Schedule Mirage DuckDNS address updates
+
+[Timer]
+OnBootSec={{ duckdns_update_on_boot_delay }}
+OnUnitActiveSec={{ duckdns_update_interval }}
+RandomizedDelaySec={{ duckdns_update_random_delay }}
+Persistent=true
+Unit=mirage-duckdns-update.service
+
+[Install]
+WantedBy=timers.target

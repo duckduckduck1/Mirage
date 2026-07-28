@@ -1,0 +1,12 @@
+---
+- name: Reload systemd for dynamic DNS
+  ansible.builtin.systemd:
+    daemon_reload: true
+  listen: Reload dynamic DNS units
+
+- name: Restart dynamic DNS timer
+  ansible.builtin.systemd:
+    name: mirage-duckdns-update.timer
+    state: restarted
+    enabled: true
+  listen: Reload dynamic DNS units

@@ -1,0 +1,362 @@
+---
+- name: Validate Caddy and subscription settings
+  ansible.builtin.assert:
+    that:
+      - caddy_subscription_enabled | bool
+      - caddy_subscription_domain == tls_certificate_domain
+      - caddy_subscription_external_port == 2096
+      - caddy_subscription_image == "caddy:2.11.4-alpine"
+      - caddy_subscription_marzban_compose_file == "/opt/marzban/docker-compose.yml"
+      - caddy_subscription_compose_file == "/opt/marzban/docker-compose.mirage-caddy.yml"
+      - caddy_subscription_compose_project == "mirage-caddy"
+      - caddy_subscription_caddyfile == "/opt/marzban/Caddyfile"
+      - caddy_subscription_socket_path == "/var/lib/marzban/marzban.socket"
+      - caddy_subscription_certificate_path == tls_certificate_fullchain_path
+      - caddy_subscription_key_path == tls_certificate_key_path
+      - caddy_subscription_path_file == "/etc/mirage/secrets/subscription_path"
+      - caddy_subscription_profile_title is match('^[A-Za-z0-9 _.-]{1,64}$')
+      - caddy_subscription_update_interval_hours | int >= 1
+      - caddy_subscription_update_interval_hours | int <= 168
+      - >-
+        caddy_subscription_external_port in (allowed_tcp_ports | default([]))
+      - >-
+        caddy_subscription_verify_ca_file == "" or
+        caddy_subscription_verify_ca_file is match('^/')
+    fail_msg: >-
+      Caddy must use the reviewed image, port 2096, the shared certificate and
+      Marzban Unix socket. The subscription path is a root-only generated value.
+  no_log: true
+
+- name: Inspect Caddy prerequisites
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: true
+  loop:
+    - "{{ caddy_subscription_marzban_compose_file }}"
+    - "{{ caddy_subscription_socket_path }}"
+    - "{{ caddy_subscription_certificate_path }}"
+    - "{{ caddy_subscription_key_path }}"
+  register: caddy_subscription_prerequisite_stats
+
+- name: Require the active Marzban socket and common certificate
+  ansible.builtin.assert:
+    that:
+      - caddy_subscription_prerequisite_stats.results | length == 4
+      - >-
+        caddy_subscription_prerequisite_stats.results
+        | map(attribute="stat.exists") | min
+      - >-
+        caddy_subscription_prerequisite_stats.results[0].stat.isreg | default(false)
+      - >-
+        caddy_subscription_prerequisite_stats.results[1].stat.issock | default(false)
+      - >-
+        caddy_subscription_prerequisite_stats.results[2].stat.isreg | default(false)
+      - >-
+        caddy_subscription_prerequisite_stats.results[3].stat.isreg | default(false)
+    fail_msg: >-
+      Marzban must be available through its Unix socket and the common
+      certificate must exist before Caddy is started.
+  no_log: true
+
+- name: Inspect the generated subscription path
+  ansible.builtin.stat:
+    path: "{{ caddy_subscription_path_file }}"
+  register: caddy_subscription_path_stat
+  no_log: true
+
+- name: Generate the non-default subscription path
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - rand
+      - -hex
+      - "16"
+  when: not caddy_subscription_path_stat.stat.exists
+  register: caddy_subscription_path_generation
+  changed_when: true
+  no_log: true
+
+- name: Store the root-only subscription path
+  ansible.builtin.copy:
+    content: "{{ caddy_subscription_path_generation.stdout | trim }}\n"
+    dest: "{{ caddy_subscription_path_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: not (caddy_subscription_path_generation.skipped | default(false))
+  no_log: true
+
+- name: Enforce subscription path permissions
+  ansible.builtin.file:
+    path: "{{ caddy_subscription_path_file }}"
+    state: file
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Read the generated subscription path
+  ansible.builtin.slurp:
+    src: "{{ caddy_subscription_path_file }}"
+  register: caddy_subscription_path_file
+  no_log: true
+
+- name: Assemble the root-only subscription settings
+  ansible.builtin.set_fact:
+    caddy_subscription_path: >-
+      {{ caddy_subscription_path_file.content | b64decode | trim }}
+    caddy_subscription_url_prefix: >-
+      https://{{ caddy_subscription_domain }}:{{ caddy_subscription_external_port }}
+  no_log: true
+
+- name: Validate the generated subscription path
+  ansible.builtin.assert:
+    that:
+      - caddy_subscription_path is match('^[0-9a-f]{32}$')
+    fail_msg: "The generated subscription path is missing or malformed."
+  no_log: true
+
+- name: Configure the HTTPS subscription URL prefix
+  ansible.builtin.lineinfile:
+    path: /opt/marzban/.env
+    regexp: '^#?[ \t]*XRAY_SUBSCRIPTION_URL_PREFIX[ \t]*[:=].*$'
+    line: 'XRAY_SUBSCRIPTION_URL_PREFIX = "{{ caddy_subscription_url_prefix }}"'
+    owner: root
+    group: root
+    mode: "0600"
+  register: caddy_subscription_url_prefix_setting
+  no_log: true
+
+- name: Configure the generated subscription path
+  ansible.builtin.lineinfile:
+    path: /opt/marzban/.env
+    regexp: '^#?[ \t]*XRAY_SUBSCRIPTION_PATH[ \t]*[:=].*$'
+    line: 'XRAY_SUBSCRIPTION_PATH = "{{ caddy_subscription_path }}"'
+    owner: root
+    group: root
+    mode: "0600"
+  register: caddy_subscription_path_setting
+  no_log: true
+
+- name: Configure the subscription display title
+  ansible.builtin.lineinfile:
+    path: /opt/marzban/.env
+    regexp: '^#?[ \t]*SUB_PROFILE_TITLE[ \t]*[:=].*$'
+    line: 'SUB_PROFILE_TITLE = "{{ caddy_subscription_profile_title }}"'
+    owner: root
+    group: root
+    mode: "0600"
+  register: caddy_subscription_title_setting
+  no_log: true
+
+- name: Configure the subscription update interval
+  ansible.builtin.lineinfile:
+    path: /opt/marzban/.env
+    regexp: '^#?[ \t]*SUB_UPDATE_INTERVAL[ \t]*[:=].*$'
+    line: >-
+      SUB_UPDATE_INTERVAL = {{ caddy_subscription_update_interval_hours | int }}
+    owner: root
+    group: root
+    mode: "0600"
+  register: caddy_subscription_interval_setting
+  no_log: true
+
+- name: Install the Caddyfile with the shared certificate
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ caddy_subscription_caddyfile }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: caddy_subscription_caddyfile_setting
+  no_log: true
+
+- name: Install the reviewed Caddy Compose addition
+  ansible.builtin.template:
+    src: docker-compose.mirage-caddy.yml.j2
+    dest: "{{ caddy_subscription_compose_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: caddy_subscription_compose_setting
+  no_log: true
+
+- name: Validate the dedicated Caddy Compose configuration
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ caddy_subscription_compose_file }}"
+      - -p
+      - "{{ caddy_subscription_compose_project }}"
+      - config
+      - -q
+  changed_when: false
+
+- name: Restart Marzban after subscription setting changes
+  ansible.builtin.command:
+    argv:
+      - marzban
+      - restart
+      - --no-logs
+  when: >-
+    caddy_subscription_url_prefix_setting.changed or
+    caddy_subscription_path_setting.changed or
+    caddy_subscription_title_setting.changed or
+    caddy_subscription_interval_setting.changed
+  changed_when: true
+
+- name: Wait for Marzban after subscription setting changes
+  ansible.builtin.wait_for:
+    path: "{{ caddy_subscription_socket_path }}"
+    state: present
+    timeout: 120
+
+- name: Inspect a legacy Caddy container in the Marzban Compose project
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ caddy_subscription_compose_file }}"
+      - -p
+      - marzban
+      - ps
+      - -q
+      - caddy
+  register: caddy_subscription_legacy_caddy
+  changed_when: false
+
+- name: Remove the legacy Caddy container from the Marzban Compose project
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ caddy_subscription_compose_file }}"
+      - -p
+      - marzban
+      - rm
+      - --stop
+      - --force
+      - caddy
+  when: caddy_subscription_legacy_caddy.stdout | trim | length > 0
+  changed_when: true
+
+- name: Start Caddy on the dedicated HTTPS port
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ caddy_subscription_compose_file }}"
+      - -p
+      - "{{ caddy_subscription_compose_project }}"
+      - up
+      - -d
+      - caddy
+  register: caddy_subscription_start
+  changed_when: >-
+    'Started' in caddy_subscription_start.stdout or
+    'Created' in caddy_subscription_start.stdout or
+    'Recreated' in caddy_subscription_start.stdout or
+    'Started' in caddy_subscription_start.stderr or
+    'Created' in caddy_subscription_start.stderr or
+    'Recreated' in caddy_subscription_start.stderr
+
+- name: Reload Caddy after a Caddyfile change
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ caddy_subscription_compose_file }}"
+      - -p
+      - "{{ caddy_subscription_compose_project }}"
+      - exec
+      - -T
+      - caddy
+      - caddy
+      - reload
+      - --config
+      - /etc/caddy/Caddyfile
+      - --adapter
+      - caddyfile
+  when: caddy_subscription_caddyfile_setting.changed
+  changed_when: true
+
+- name: Validate the active Caddyfile
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ caddy_subscription_compose_file }}"
+      - -p
+      - "{{ caddy_subscription_compose_project }}"
+      - exec
+      - -T
+      - caddy
+      - caddy
+      - validate
+      - --config
+      - /etc/caddy/Caddyfile
+      - --adapter
+      - caddyfile
+  changed_when: false
+
+- name: Wait for the dedicated HTTPS listener
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ caddy_subscription_external_port }}"
+    state: started
+    timeout: 60
+
+- name: Request Marzban through Caddy with certificate verification
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [
+          'curl', '--silent', '--show-error', '--fail', '--max-time', '30',
+          '--resolve',
+          caddy_subscription_domain ~ ':' ~
+          (caddy_subscription_external_port | string) ~ ':127.0.0.1'
+        ]
+        +
+        (
+          ['--cacert', caddy_subscription_verify_ca_file]
+          if caddy_subscription_verify_ca_file | length > 0
+          else []
+        )
+        +
+        [
+          'https://' ~ caddy_subscription_domain ~ ':' ~
+          (caddy_subscription_external_port | string) ~ '/dashboard/',
+          '--output', '/dev/null'
+        ]
+      }}
+  changed_when: false
+  no_log: true
+
+- name: Inspect the active Caddy service
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ caddy_subscription_compose_file }}"
+      - -p
+      - "{{ caddy_subscription_compose_project }}"
+      - ps
+      - --status
+      - running
+      - --services
+  register: caddy_subscription_services
+  changed_when: false
+
+- name: Confirm Caddy subscription acceptance conditions
+  ansible.builtin.assert:
+    that:
+      - "'caddy' in caddy_subscription_services.stdout_lines"
+    fail_msg: "Caddy is not running on the dedicated HTTPS port."

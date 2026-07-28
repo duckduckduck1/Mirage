@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+
+if test -f {{ tls_reload_caddy_compose_file | quote }}; then
+  marzban restart --no-logs
+
+  for attempt in $(seq 1 120); do
+    test -S /var/lib/marzban/marzban.socket && break
+    sleep 1
+  done
+  test -S /var/lib/marzban/marzban.socket
+
+  if docker compose \
+    -f {{ tls_reload_caddy_compose_file | quote }} \
+    -p {{ tls_reload_caddy_compose_project | quote }} \
+    ps --status running --services | grep -qx caddy; then
+  docker compose \
+    -f {{ tls_reload_caddy_compose_file | quote }} \
+    -p {{ tls_reload_caddy_compose_project | quote }} \
+    exec -T caddy \
+    caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+  fi
+else
+  marzban restart --no-logs
+fi
