@@ -39,6 +39,9 @@ infra/ansible/*.log
 *.log
 tmp/
 .tmp/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+node_modules/
 
 # === Python (скрипты/утилиты) ===
 __pycache__/
