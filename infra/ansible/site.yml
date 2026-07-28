@@ -35,6 +35,13 @@
         - bootstrap
         - security
 
+    - role: docker_engine
+      when: docker_engine_install_enabled | bool
+      tags:
+        - bootstrap
+        - docker
+        - docker-engine
+
     - role: network_tuning
       tags:
         - bootstrap

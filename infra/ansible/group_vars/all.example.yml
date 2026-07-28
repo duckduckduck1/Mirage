@@ -17,6 +17,11 @@ revoked_tcp_ports:
   - 80
   - 8388
 
+# Сценарий чистого VPS: только на новом Ubuntu 22.04 без Docker и данных
+# контейнеров. Для уже подготовленного VPS оставь false: роль Marzban сама
+# проверит наличие Docker Compose и откажется заменять чужую установку.
+docker_engine_install_enabled: false
+
 # Роль ставит rollback-таймер. После проверки нового key-only сеанса выполни
 # sudo /usr/local/sbin/mirage-ssh-confirm
 enable_ssh_hardening: true

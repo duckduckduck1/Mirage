@@ -1,0 +1,88 @@
+---
+- name: Require a supported clean Ubuntu VPS for Docker Engine
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == docker_engine_supported_distribution
+      - ansible_distribution_version == docker_engine_supported_version
+      - ansible_architecture in ["x86_64", "aarch64"]
+    fail_msg: >-
+      Docker bootstrap supports only Ubuntu 22.04 LTS on x86_64 or arm64.
+      Prepare other systems separately and use the prepared-VPS scenario.
+
+- name: Inspect an existing Docker executable
+  ansible.builtin.command:
+    argv:
+      - docker
+      - version
+  register: docker_engine_existing_command
+  changed_when: false
+  failed_when: false
+
+- name: Inspect existing Docker data directory
+  ansible.builtin.stat:
+    path: /var/lib/docker
+  register: docker_engine_existing_data
+
+- name: Refuse to alter an existing Docker installation or data
+  ansible.builtin.assert:
+    that:
+      - docker_engine_existing_command.rc != 0
+      - not docker_engine_existing_data.stat.exists
+    fail_msg: >-
+      Docker or its data already exists. Do not replace it automatically; use
+      the prepared-VPS scenario after verifying the shared host manually.
+
+- name: Install Docker repository prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the Docker APT keyring directory
+  ansible.builtin.file:
+    path: "{{ docker_engine_keyring_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install Docker's official APT signing key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: "{{ docker_engine_keyring_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure Docker's official APT repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}
+      signed-by={{ docker_engine_keyring_path }}]
+      https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+    filename: docker
+    state: present
+    update_cache: true
+
+- name: Install Docker Engine and Compose plugin
+  ansible.builtin.apt:
+    name: "{{ docker_engine_packages }}"
+    state: present
+    update_cache: true
+
+- name: Enable and start Docker
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Verify Docker Compose is available
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - version
+  changed_when: false

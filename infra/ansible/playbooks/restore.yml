@@ -1,0 +1,87 @@
+---
+# Восстановление использует штатный архив Marzban SQLite. Архив передаётся
+# только как root-only путь вне checkout и должен содержать лишь /opt/marzban
+# и /var/lib/marzban, как описано в официальной документации Marzban.
+- import_playbook: ../site.yml
+
+- name: Restore a verified Marzban SQLite archive
+  hosts: mirage_vps
+  gather_facts: true
+  vars:
+    marzban_restore_archive: ""
+
+  pre_tasks:
+    - name: Confirm that restoration runs locally as root
+      ansible.builtin.assert:
+        that:
+          - ansible_connection == "local"
+          - ansible_user_id == "root"
+          - marzban_restore_archive | length > 0
+        fail_msg: >-
+          Run locally as root and pass marzban_restore_archive as an absolute
+          root-only path outside the Git checkout.
+
+    - name: Inspect the supplied Marzban archive
+      ansible.builtin.stat:
+        path: "{{ marzban_restore_archive }}"
+      register: marzban_restore_archive_stat
+
+    - name: Require a regular supplied archive
+      ansible.builtin.assert:
+        that:
+          - marzban_restore_archive_stat.stat.exists
+          - marzban_restore_archive_stat.stat.isreg
+          - marzban_restore_archive_stat.stat.pw_name == "root"
+        fail_msg: >-
+          The archive must be an existing regular file owned by root. Do not
+          place backup archives in the Git checkout.
+
+    - name: List archive members before extraction
+      ansible.builtin.command:
+        argv:
+          - tar
+          - --list
+          - --file
+          - "{{ marzban_restore_archive }}"
+      register: marzban_restore_members
+      changed_when: false
+
+    - name: Reject an archive outside documented Marzban directories
+      ansible.builtin.assert:
+        that:
+          - marzban_restore_members.stdout_lines | length > 0
+          - >-
+            marzban_restore_members.stdout_lines
+            | reject('match', '^\\.?/?(opt/marzban|var/lib/marzban)(/|$)')
+            | list
+            | length == 0
+        fail_msg: >-
+          The archive contains paths outside /opt/marzban and /var/lib/marzban;
+          refuse extraction and inspect the archive manually.
+
+  tasks:
+    - name: Restore documented Marzban application and state directories
+      ansible.builtin.unarchive:
+        src: "{{ marzban_restore_archive }}"
+        dest: /
+        remote_src: true
+
+- import_playbook: ../site.yml
+
+- name: Apply the required post-restore Marzban restart
+  hosts: mirage_vps
+  gather_facts: false
+
+  tasks:
+    - name: Restart Marzban after archive restoration
+      ansible.builtin.command:
+        argv:
+          - marzban
+          - restart
+      changed_when: true
+
+    - name: Confirm that the restored Marzban socket exists
+      ansible.builtin.wait_for:
+        path: /var/lib/marzban/marzban.socket
+        state: present
+        timeout: 120
