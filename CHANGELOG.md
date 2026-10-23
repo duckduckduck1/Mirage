@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-24 — VPS test preparation
+
+- Staged separate test configuration and validated TLS copies, cached the official
+  image and pinned Caddy to the observed working reference.
+- Prepared restricted GitHub secret delivery and encrypted recovery material.
+- Documented the insufficient concurrent-test RAM and the authorized sequential
+  test procedure. Marzban remains running; 3x-ui has not started or been accepted.
+
 ## 2026-10-24 — Official 3x-ui deployment candidate
 
 - Replaced the untested fresh Marzban recipe with one Compose using official

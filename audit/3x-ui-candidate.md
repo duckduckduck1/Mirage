@@ -2,8 +2,9 @@
 
 [README](../README.md) · [Migration](../docs/migration.md)
 
-Scope: official v3.10.2 sources, public registry metadata and local checks.
-No VPS access, live subscription requests or bot messages were performed.
+Initial review scope: official v3.10.2 sources, public registry metadata and local
+checks, without VPS access or bot messages. Subsequent authorized VPS preparation
+is recorded separately below.
 
 | Artifact | Observed value |
 | --- | --- |
@@ -46,3 +47,46 @@ Actual container startup, native API/bot delivery, all user/transport tests,
 subscription cold starts, GUI/TUN, TLS continuity, downloaded recovery restoration,
 48-hour observation and production cutover remain pending. The current Marzban
 results do not establish these properties for the candidate.
+
+## VPS preparation — 2026-10-24
+
+- A fresh encrypted external recovery bundle contains the repaired Marzban core,
+  a consistent SQLite snapshot with four users, both installed images, TLS/ACME,
+  configuration and the four approved external maintenance scripts. Decryption,
+  required members and SQLite integrity passed. Full restoration is still pending.
+- Reviewed source, separate private test settings/data and a validated certificate
+  copy were staged. Compose validation passed. Public bindings remain loopback.
+- The official 3x-ui candidate was cached by the reviewed digest for amd64. Its
+  extracted core on the VPS matched the SHA256 and version/build recorded above;
+  only the binary's version command ran. The temporary unstarted inspection
+  container was removed. No candidate service was started. The running Caddy reference is
+  `caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648`;
+  the example now preserves this inventoried reference rather than the earlier
+  template candidate listed above.
+- All six test ports were free. Disk space was sufficient, but approximately
+  304 MiB was available on an 888 MiB host, below the 512 MiB concurrent-test gate.
+  The owner authorized a sequential test after preparation; memory must be
+  rechecked after stopping Marzban. No stop or restart has occurred during preparation.
+- A distinct SSH account/key permits only the exact staging secret receiver.
+  A real authentication test reached its forced command; invalid input was rejected
+  without changing settings. The private key was generated in memory and stored
+  directly in GitHub, without a permanent local private-key file.
+- All seven staging secret names are present. After owner Environment approval,
+  the [manual delivery workflow](https://github.com/duckduckduck1/Mirage/actions/runs/40030510782)
+  from merged `main` succeeded with `apply_bot=false`. On the VPS, Telegram
+  confirmed the new bot token, its distinction from the legacy token, the owner's
+  private chat and absence of a webhook. No message was sent or poller enabled.
+- A separate consistent SQLite snapshot and private draft native API payloads
+  contain all four active, unlimited, non-expiring users and all four inbounds.
+  No per-user inbound exclusions were present. UUID/password, REALITY and
+  transport settings were retained; only test ports and certificate paths differ.
+  No tables were imported and no live database was modified. Runtime API and
+  generated-subscription validation remain pending.
+- Official age v1.3.2 was checked against its release asset checksum and installed.
+  Its public recovery recipient was configured; the private identity was encrypted
+  outside Git without plaintext persistence. A round-trip encryption test passed.
+  An independent protected identity copy remains an owner task. No backup timer,
+  DNS job, ACME hook or bot poller was enabled or replaced.
+- Existing Marzban/Caddy container start times and restart counts remained unchanged.
+  Staging files and image caching do not establish application, VPN or subscription
+  acceptance.

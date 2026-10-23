@@ -2,9 +2,9 @@
 
 [README](../README.md) · [Operations](operations.md) · [Recovery](recovery.md) · [Migration](migration.md)
 
-**Status: candidate configuration, not deployed or accepted.** Server preparation
-requires separate authorization. Keep the existing Marzban deployment running
-throughout the isolated test.
+**Status: candidate staged, not started or accepted.** Keep Marzban running during
+preparation. Concurrent testing requires the memory gate below; a sequential test
+requires an explicitly authorized interruption and a ready rollback.
 
 ## Requirements and versions
 
@@ -13,10 +13,9 @@ throughout the isolated test.
 - At least 512 MiB `MemAvailable`, free test ports and disk space for image archives.
 - A fresh recovery copy of the repaired Marzban installation before server changes.
 
-The [example environment](../.env.example) pins official 3x-ui v3.10.2 and a Caddy
-candidate by digest. Replace the Caddy candidate with the actual inventoried
-working version/digest before production. Its sample version comes from the
-archived template, not a current server inspection.
+The [example environment](../.env.example) pins official 3x-ui v3.10.2 and the
+existing Caddy version/digest observed on 2026-10-24. Recheck the running image
+identities before a later deployment; do not substitute a moving tag.
 
 The upstream [Compose file](https://github.com/MHSanaei/3x-ui/blob/v3.10.2/docker-compose.yml)
 builds the application locally. This repository instead consumes its official
@@ -40,6 +39,15 @@ Use a separate Compose project, bridge network and data directories. Never share
 production SQLite or writable Marzban directories. The two services are capped
 at 320 and 64 MiB, with no additional swap budget. Stop the test on memory pressure,
 OOM or degradation of the existing VPN. An occupied test port blocks preparation.
+
+The current VPS has 888 MiB RAM and approximately 304 MiB available during
+preparation, below the concurrent-test gate. The owner authorized stopping Marzban
+after preparation. Do not stop it until secret delivery, rollback material and
+the launch procedure are ready. Announce the interruption, stop Marzban, then
+remeasure memory before starting the candidate. If less than 512 MiB is available,
+restart Marzban and stop the attempt. Retain separate data and test ports; this
+sequential test does not constitute production cutover. Old VPN profiles are
+unavailable while Marzban is stopped.
 
 Place the checkout at `/opt/mirage`. Create root-owned mode 0700 directories
 `/etc/mirage-test`, `/var/lib/mirage-test`, and its `db` and `tls` subdirectories.
