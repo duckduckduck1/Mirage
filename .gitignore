@@ -7,12 +7,17 @@
 *.crt
 *.p12
 *.vault
+*.age
+*.gpg
+*.age.part
+*.identity
 vault-password*
 .vault_pass*
 secrets/
 credentials/
 backups/
 exports/
+state/
 access
 *_token
 *_key

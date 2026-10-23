@@ -1,0 +1,11 @@
+{
+  "project_dir": "/opt/mirage",
+  "env_file": "/etc/mirage/compose.env",
+  "state_dir": "/var/lib/mirage",
+  "acme_dir": "/root/.acme.sh",
+  "age_recipient": "CHANGE_ME_AGE_RECIPIENT",
+  "telegram_token": "<BOT_TOKEN>",
+  "telegram_chat_id": "<ADMIN_ID>",
+  "public_host": "vpn.example.com",
+  "ca_file": null
+}

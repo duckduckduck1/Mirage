@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Mirage recovery copy at 03:00 Saratov time
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 Europe/Saratov
+Persistent=true
+Unit=mirage-backup.service
+
+[Install]
+WantedBy=timers.target

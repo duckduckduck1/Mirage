@@ -1,0 +1,77 @@
+services:
+  x-ui:
+    image: ${XUI_IMAGE:?Set the verified official image digest}
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      TZ: Europe/Saratov
+      XUI_PORT: "12080"
+      XUI_DB_TYPE: sqlite
+      XUI_ENABLE_FAIL2BAN: "false"
+      XUI_TUNNEL_HEALTH_MONITOR: "false"
+    ports:
+      - "127.0.0.1:${PANEL_PORT:?}:12080"
+      - "${BIND_IP:?}:${TCP_PORT:?}:${TCP_PORT:?}/tcp"
+      - "${BIND_IP:?}:${GRPC_PORT:?}:${GRPC_PORT:?}/tcp"
+      - "${BIND_IP:?}:${XHTTP_PORT:?}:${XHTTP_PORT:?}/tcp"
+      - "${BIND_IP:?}:${TROJAN_PORT:?}:${TROJAN_PORT:?}/tcp"
+    volumes:
+      - type: bind
+        source: ${DB_DIR:?}
+        target: /etc/x-ui
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TLS_DIR:?}
+        target: /certs
+        read_only: true
+        bind:
+          create_host_path: false
+    mem_limit: 320m
+    memswap_limit: 320m
+    pids_limit: 256
+    cap_drop: [NET_RAW]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, curl, --silent, --show-error, --max-time, "5", --output, /dev/null, "http://127.0.0.1:12080/"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  caddy:
+    image: ${CADDY_IMAGE:?Set the inventoried Caddy image digest}
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?}
+    ports:
+      - "${BIND_IP:?}:${SUB_HTTPS_PORT:?}:443/tcp"
+    volumes:
+      - type: bind
+        source: ./infra/Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TLS_DIR:?}
+        target: /certs
+        read_only: true
+        bind:
+          create_host_path: false
+    mem_limit: 64m
+    memswap_limit: 64m
+    pids_limit: 128
+    cap_drop: [NET_RAW]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
