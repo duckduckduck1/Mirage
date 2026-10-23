@@ -1,5 +1,3 @@
-# EditorConfig — единый стиль файлов для любого редактора
-# https://editorconfig.org
 root = true
 
 [*]
@@ -10,18 +8,8 @@ trim_trailing_whitespace = true
 indent_style = space
 indent_size = 2
 
-# В Markdown два пробела в конце строки = жёсткий перенос, не трогаем
 [*.md]
 trim_trailing_whitespace = false
 
-[*.{tf,tfvars}]
-indent_size = 2
-
-[*.{yml,yaml}]
-indent_size = 2
-
 [*.py]
 indent_size = 4
-
-[Makefile]
-indent_style = tab
