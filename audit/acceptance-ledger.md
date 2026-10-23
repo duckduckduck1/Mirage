@@ -60,6 +60,16 @@ Its source is preserved at the
   was performed for this repository change. The new upstream setup, restoration
   and client traffic remain operationally untested.
 
+## Repository publication — 2026-10-23
+
+- The simplification was published to `origin/dev`. The
+  [GitHub Actions run](https://github.com/duckduckduck1/Mirage/actions/runs/39991353216)
+  for commit `d9a8aebd59fdc33327899d55cc4804a1af0f1dd1` completed successfully.
+- GitHub Pages was disabled through its repository API after the new documents
+  were published. A subsequent site API read returned HTTP 404.
+- These are repository/hosting checks only. They do not change the legacy VPS or
+  establish operational acceptance of the documented upstream setup.
+
 ## Evidence policy
 
 Every future entry records the date, tested component versions, non-sensitive
