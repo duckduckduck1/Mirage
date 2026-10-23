@@ -1,61 +1,59 @@
-# === Секреты и креды — НИКОГДА не коммитить ===
+# Private configuration, credentials and recovery data
 .env
 .env.*
+!*.example
 *.key
 *.pem
 *.crt
 *.p12
+*.vault
+vault-password*
+.vault_pass*
 secrets/
+credentials/
 backups/
 exports/
-*.backup
-*.dump
+access
+*_token
+*_key
 *.db
 *.sqlite
 *.sqlite3
-!*.example
-
-# === Terraform ===
-.terraform/
-*.tfstate
-*.tfstate.*
+*.db-*
+*.sqlite*-*
+*.backup
+*.dump
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.tfstate*
 *.tfvars
 !*.tfvars.example
-crash.log
-# .terraform.lock.hcl — НЕ игнорируем: lock-файл должен быть в гите
 
-# === Ansible ===
-*.retry
-vault-password*
-.vault_pass*
-*.vault
-infra/ansible/group_vars/*.yml
-!infra/ansible/group_vars/*.example.yml
-infra/ansible/host_vars/
-infra/ansible/inventory/*.local.*
-infra/ansible/*.log
-
-# === Логи и временное ===
-*.log
-tmp/
-.tmp/
-docs/.vitepress/cache/
-docs/.vitepress/dist/
-node_modules/
-
-# === Python (скрипты/утилиты) ===
-__pycache__/
-*.py[cod]
+# Local environments, generated output and editor files
 .venv/
 venv/
 .tools/
-ops/xui/*.local.json
-ops/xui/output/
-
-# === ОС и редакторы ===
-.DS_Store
-Thumbs.db
+node_modules/
+__pycache__/
+*.py[cod]
+*.log
+*.retry
+tmp/
+.tmp/
+.terraform/
 .idea/
 .vscode/
+.DS_Store
+Thumbs.db
 *.swp
 *~
+
+# Preserve private/generated leftovers from the archived checkout
+docs/.vitepress/
+infra/ansible/group_vars/
+infra/ansible/host_vars/
+infra/ansible/inventory/*.local.*
+ops/xui/*.local.json
+ops/xui/output/

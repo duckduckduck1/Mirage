@@ -1,18 +1,16 @@
-## Что изменено
+## Change
 
-<!-- Кратко опиши изменения. -->
+<!-- Describe the operating problem and resulting documentation or check changes. -->
 
-## Зачем
+## Verification
 
-<!-- Какую проблему решает PR. -->
+<!-- Report actual checks and distinguish them from any unperformed server tests. -->
 
-## Как проверено
+- [ ] `python3 scripts/check.py` passes with new files staged.
+- [ ] `git diff --check` passes and the staged diff contains no private data.
+- [ ] Documentation is in English and distinguishes new setup from legacy state.
+- [ ] No VPS was accessed or changed for repository-only work.
 
-<!-- Команды, ручные проверки, скриншоты, если нужны. -->
+## Limits
 
-## Чек-лист
-
-- [ ] Ветка создана от свежего `main`.
-- [ ] Коммит оформлен по Conventional Commits.
-- [ ] Документация обновлена, если изменилось поведение.
-- [ ] В коммит не попали секреты: ключи, пароли, `.env`, backup-файлы, client links.
+<!-- Record installation, recovery or client scenarios that remain untested. -->
