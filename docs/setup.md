@@ -18,8 +18,17 @@ identity to preserve; I have not changed it as part of these notes.
 | Certificate | Let's Encrypt through acme.sh, standalone HTTP validation |
 | Example hostname | `vpn.example.com`, replaced everywhere with my domain |
 
-I chose one transport with ordinary TLS certificates to keep the initial setup
-small. I still need to test whether it works on the networks my friends and I use.
+I picked Trojan for this first draft because it uses ordinary TLS and avoids the
+REALITY subscription `sid` issue below. That made the example smaller; it did not
+establish which protocol works better on my networks. I should not replace my
+working REALITY profiles with this recipe just to simplify the guide.
+
+With Trojan I need my own certificate for the proxy connection. REALITY has a
+different handshake and target setup; it does not require my own proxy certificate.
+These are different choices, not a reliability ranking for Russia. The designs
+are described in the [Trojan protocol](https://trojan-gfw.github.io/trojan/protocol)
+and [REALITY documentation](https://github.com/XTLS/REALITY/blob/main/README.en.md).
+I need client tests on the actual networks before choosing a migration target.
 The [official v0.8.4 release](https://github.com/Gozargah/Marzban/releases/tag/v0.8.4)
 is my candidate for this recipe; I have not tested it here. I will review the
 release again before installing. I have not included REALITY in this setup; its

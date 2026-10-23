@@ -57,6 +57,21 @@ For a native archive, I'll inspect its contents first: the
 may package the database/configuration separately and exclude a custom Xray core.
 I cannot restore different formats by assuming the same archive layout.
 
+## My local encrypted files
+
+For my existing deployment, I keep private recovery material outside the checkout
+in `~/.local/share/mirage/`. Its private `README.md` records the archive/key paths
+and how to decrypt to a private staging directory. The former loose `access`,
+`bot_telegram_key` and `duckdns_token` files are in an encrypted archive there;
+I verified their decrypted bytes before removing the plaintext originals.
+
+The separate key files are under `~/.config/mirage/`, with access restricted to my
+account. This is a local encrypted archive, not a password manager. I still need
+an independent copy of the encrypted files and to put the keys in my password
+manager. Keeping everything on one computer does not cover losing that computer.
+My documentation CI does not need these credentials, so I have not uploaded them
+to GitHub Actions secrets.
+
 ## Restore in isolation first
 
 1. On an isolated VPS, install the same official Marzban release. Stop it before

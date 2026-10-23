@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-23 — Existing-server checks and private recovery files
+
+- Clarified that the Trojan installation example was chosen for a smaller draft
+  and to avoid REALITY subscription handling, not for proven reliability in Russia.
+  Working VLESS profiles remain part of the existing deployment.
+- Recorded subscription and server-loopback transport checks separately from
+  external client/network tests. Kept the new installation explicitly untested.
+- Recorded a verified encrypted recovery copy, restricted data permissions and
+  retirement of the obsolete 3x-ui backup timer without restarting VPN services.
+- Documented local encrypted credential storage outside Git. Full restoration,
+  network-specific failures and the separate old Certbot lineage remain unresolved.
+
 ## 2026-10-23 — Personal runbook
 
 - Refocused README on installation, maintenance and recovery. Kept existing-server

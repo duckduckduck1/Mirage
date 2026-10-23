@@ -33,9 +33,47 @@ serving the previous certificate. The hook still restarts Marzban on renewal;
 that behavior can interrupt VPN traffic and requires separate investigation.
 
 The same audit found a legacy backup timer failing and SQLite readable by other
-local accounts. Backup delivery and a fresh external recovery drill were not
-established by that audit. These remain server maintenance tasks; this repository
-cleanup does not resolve them.
+local accounts. Those two issues were addressed in the separate maintenance below.
+Backup delivery and a fresh full restoration drill were not established by the
+audit or by the repository cleanup.
+
+## What I checked on 2026-10-23
+
+For the existing deployment, all four users were active. Twelve subscription
+requests succeeded: four users in generic, Hiddify and Karing formats. Their
+ports, transports and REALITY short IDs matched the server settings. Generic
+output contained four profiles; Hiddify and Karing each received three.
+
+The installed sing-box generator explicitly skips XHTTP. That explains why I
+cannot count it as a usable fourth profile in those subscriptions. A temporary
+Xray client on the VPS passed HTTPS traffic through all four existing inbounds,
+including XHTTP. This was a loopback test on the server, not a test through MTS,
+Beeline or the university Wi-Fi. I still need matching client/network observations
+to explain failures on those paths.
+
+The certificates served on Trojan and the public subscription listener matched
+the installed file and expired on 2026-12-25. The running Xray was still
+v24.12.31. These checks did not establish a reason to reinstall Marzban or discard
+the working REALITY profiles.
+
+Before maintenance, I obtained an encrypted external copy with a consistent
+SQLite snapshot, the current image and required configuration/scripts. Decryption,
+archive checks and SQLite integrity passed; full restoration remains untested.
+I then restricted the data directory to `0700` and SQLite to `0600`, and disabled
+the obsolete 3x-ui backup timer. The native Marzban backup schedule was preserved;
+delivery was not retested. The same twelve subscription URLs and their profile
+parameters passed before and after. User credentials and signing state were
+unchanged, and neither working container restarted.
+
+A failed Certbot service also manages a separate expired webroot certificate,
+with references still present in configuration. I left it in place until I can
+establish its purpose; I have not treated it as the owner of the working
+acme.sh-managed VPN certificate.
+
+My next transport decision needs tests from an affected client network. The
+single-Trojan fresh-install example is not a plan to remove my working VLESS
+profiles. I will stop before any maintenance that requires restarting a working
+VPN service and discuss the interruption first.
 
 ## REALITY subscription limitation
 

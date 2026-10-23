@@ -70,6 +70,37 @@ Its source is preserved at the
 - These are repository/hosting checks only. They do not change the legacy VPS or
   establish operational acceptance of the documented upstream setup.
 
+## Existing-server maintenance — 2026-10-23
+
+- Before changes, all four active users' subscriptions returned HTTP 200 in
+  generic, Hiddify and Karing formats. Protocol, port, transport and REALITY short
+  ID checks matched server settings. Generic output had four profiles; each
+  sing-box response had three because the installed generator excludes XHTTP.
+- A temporary Xray v24.12.31 client on server loopback passed an external HTTPS
+  request through each of the four existing inbounds. This does not verify any
+  external client network, client application or censorship-resistance claim.
+- Both existing public TLS services presented trusted certificates matching the
+  installed file and expiring on 2026-12-25.
+- An encrypted copy was verified outside the checkout and VPS: consistent SQLite
+  snapshot with four users, application configuration, ACME state, current image
+  and four external maintenance scripts. Ciphertext checksum, GPG decryption and
+  SQLite integrity passed. Full restoration on another VPS was not performed.
+- SQLite permissions became `0600` and the data directory `0700`. The obsolete
+  3x-ui backup timer was disabled; the native Marzban backup cron was preserved.
+  Native backup delivery was not exercised.
+- The same twelve subscription URLs returned HTTP 200 before and after the
+  changes, with identical connection parameters. User/proxy credentials, signing
+  state and assignments were unchanged. Marzban and Caddy container identities,
+  start times and restart counts were unchanged; no working VPN service restarted.
+- A failed Certbot webroot lineage with an expired, different certificate was
+  observed and left unchanged pending identification of its remaining references.
+- Three loose local credential files were moved into a verified encrypted archive
+  outside Git; their plaintext originals were removed after byte comparison.
+  Keys remain in a separate restricted local directory. Independent storage of
+  those copies and password-manager storage of the keys are still owner tasks.
+- This was maintenance of the existing deployment. The proposed new-install
+  recipe has not gained installation, renewal or restoration acceptance.
+
 ## Evidence policy
 
 Every future entry records the date, tested component versions, non-sensitive
