@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-24 — Official 3x-ui deployment candidate
+
+- Replaced the untested fresh Marzban recipe with one Compose using official
+  digest-pinned 3x-ui and Caddy images, isolated ports and private persistent data.
+- Added bounded host tasks for encrypted SQLite/image recovery deliveries and
+  validated TLS publication with forced Caddy reload, without a VPN restart.
+- Added protected GitHub Environment token sources and manual verified-SSH
+  delivery; no application fork, custom image build or permanent local token file.
+- Documented native Telegram administration, acceptance, the seven-day observation
+  period and matching-data rollback. Old Marzban subscription URLs are not promised
+  compatible with 3x-ui. Historical evidence and archives remain intact.
+- Kept source/artifact and local helper checks separate from VPS, client, TLS,
+  restoration and uptime acceptance. No server migration is part of this change.
+
 ## 2026-10-24 — Existing-server Xray repair
 
 - Recorded the approved upgrade of the existing pinned core to Xray v26.7.28,

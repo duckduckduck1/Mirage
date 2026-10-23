@@ -1,106 +1,90 @@
-# Recovering my server
+# Recovery
 
-[README](../README.md) · [Installation](setup.md) · [Maintenance](operations.md)
+[README](../README.md) · [Setup](setup.md) · [Operations](operations.md) · [Migration](migration.md)
 
-I want to be able to lose the VPS and restore access without asking everyone to
-import new subscriptions. This is my proposed procedure for the new setup; I
-have not tested a restoration of it yet. My [existing server](migration.md)
-also needs its patched image and other legacy dependencies.
+**Status: restoration rehearsal pending.** Download and restore a complete
+Telegram delivery before relying on scheduled backups or replacing Marzban.
+Older encrypted Marzban recovery material remains separate.
 
-## What I'll keep outside the VPS
+## Required material
 
-- `/opt/marzban/`: deployment file and `.env`.
-- `/var/lib/marzban/`: complete SQLite state, Xray configuration and installed
-  certificates/keys.
-- `/root/.acme.sh/` and the relevant root crontab entry: account, renewal and
-  install/reload settings. This contains private keys too.
-- A private note with the hostname, DNS access, selected image tag/digest, bundled
-  Xray version and client versions I actually tested. I'll retain the image itself
-  if I cannot rely on downloading it later.
+- Recovery delivery manifest and every corresponding encrypted part.
+- The referenced image delivery manifest and encrypted image parts.
+- Age private identity from its independent protected store.
+- An isolated host with Docker Compose, Python, age and OpenSSL.
 
-I'll encrypt this bundle outside the VPS and keep its decryption key separately.
-Nothing in that list belongs in this public checkout. The official
-[backup guide](https://gozargah.github.io/marzban/en/examples/backup) covers the
-application directories; my ACME state is an additional dependency of this recipe.
+A user list or database alone omits deployment, certificates, renewal state and
+matching binaries. GitHub Secrets are not a downloadable recovery archive and do
+not replace the age identity. Neither the VPS nor Telegram stores that identity.
 
-## A simple consistent copy
+## Verify and decrypt
 
-For an occasional manual backup, I'll accept a short outage and stop Marzban
-before copying SQLite. I'll pause the ACME cron entry and wait for any running
-renewal to finish so it cannot restart Marzban during the copy. On the intended
-**VPS**, after checking there is enough disk space:
+Download from the private administrator bot conversation. Identify parts by bundle
+ID/number, not Telegram's renamed local filenames. In a new mode 0700 directory
+outside Git, compare every part against its manifest:
 
 ```bash
-sudo -i
 umask 077
-recovery_dir=$(mktemp -d /root/marzban-recovery.XXXXXXXX)
-crontab -l > "$recovery_dir/root-crontab.txt"
-docker compose -f /opt/marzban/docker-compose.yml -p marzban stop marzban
-tar -C / -czf "$recovery_dir/server.tar.gz" opt/marzban var/lib/marzban root/.acme.sh
-marzban restart --no-logs
-exit
+sha256sum part-*.age.part
+cat part-*.age.part > bundle.age
+age --decrypt -i /PRIVATE_KEY_STORE/identity -o recovered.bin bundle.age
 ```
 
-These are individual steps, not a script to run unattended. I'll proceed with
-`tar` only after the stop succeeds. If `tar` fails, I still need to restart the
-service and resolve the backup failure. I'll restore the paused ACME schedule
-after the copy and service restart. I'll record the
-generated directory path privately, transfer both files over SSH to my trusted
-workstation, encrypt them there using my chosen backup tool and check that I can
-decrypt/read the copy. Then I'll remove the temporary plaintext copies from the
-VPS and workstation. I have not chosen or tested an automated encrypted backup
-destination for this recipe yet.
+Reject missing/extra parts and incorrect hashes. Assemble in numeric order and
+keep image/recovery bundles separate. Age authentication must succeed. The image
+payload is a Docker-save tar; recovery is gzip-compressed tar. Do not print,
+commit or upload plaintext. Remove temporary decrypted data after the rehearsal.
 
-This is my own offline directory archive, not Marzban's native backup format.
-For a native archive, I'll inspect its contents first: the
-[producer script](https://github.com/Gozargah/Marzban-scripts/blob/master/marzban.sh)
-may package the database/configuration separately and exclude a custom Xray core.
-I cannot restore different formats by assuming the same archive layout.
+## Restore in isolation
 
-## My local encrypted files
+1. Inspect recovery members and link targets. Reject absolute paths, escaping
+   `..`, devices and links outside staging. Extract into private staging, not `/`.
+2. Read the inner `manifest.json`: exact image IDs/digests, actual core, SQLite
+   checksum and referenced image-bundle ID. Verify SQLite integrity and checksum.
+3. Load the verified Docker-save tar. Docker save/load does not reliably restore
+   registry digest associations. For offline recovery, tag the loaded images as
+   `mirage-recovery/x-ui:IMAGE_ID_HEX` and `mirage-recovery/caddy:IMAGE_ID_HEX`, using
+   each complete 64-character configuration ID from the inner manifest. Verify
+   `docker image inspect` matches those IDs before starting. These are the saved
+   official images, not rebuilt images.
+4. Restore `deployment/compose.yaml` and `deployment/infra/` to `/opt/mirage`;
+   private settings to `/etc/mirage`; `state/db` and `state/tls` to `/var/lib/mirage`.
+   Use root ownership, directories 0700 and private files 0600. Set image variables
+   to the verified recovery tags. Host helpers validate these tags against actual
+   immutable image IDs. `pull_policy: never` prevents registry substitution.
+5. For a rehearsal, use separate test project/data paths, test ports and matching
+   host JSON. Start with `-f compose.yaml -f infra/restore-isolated.yaml`: its
+   internal Docker network must block Internet egress before the copied bot can
+   poll. Verify that restriction, then disable Telegram in the native panel over
+   the SSH tunnel. Only then recreate on the normal test network for traffic
+   checks. Do not run delivery, backup, ACME, DNS or restored cron jobs in the clone.
+6. Verify administrator access, users, UUID/passwords, state, expiry, remaining
+   quotas, four assignments, existing 3x-ui subscriptions and actual traffic.
+   Repeat cold-start and XHTTP payload checks. Record elapsed recovery time.
+7. For actual recovery, restore ACME at the recorded private location and merge
+   only the saved ACME cron entry. Do not overwrite unrelated root jobs. Check
+   DNS credentials and certificate reload consumers before enabling renewal.
+   Reestablish GitHub token delivery and enable backup scheduling only on the
+   intended production instance.
 
-For my existing deployment, I keep private recovery material outside the checkout
-in `~/.local/share/mirage/`. Its private `README.md` records the archive/key paths
-and how to decrypt to a private staging directory. The former loose `access`,
-`bot_telegram_key` and `duckdns_token` files are in an encrypted archive there;
-I verified their decrypted bytes before removing the plaintext originals.
+During offline restore, keep verified local image-ID tags. Once registry access
+returns, explicitly pull the recorded official digest, verify the image identity
+and update the environment deliberately. Never substitute `latest` or run an
+older image against a migrated database without its matching snapshot.
 
-The separate key files are under `~/.config/mirage/`, with access restricted to my
-account. This is a local encrypted archive, not a password manager. I still need
-an independent copy of the encrypted files and to put the keys in my password
-manager. Keeping everything on one computer does not cover losing that computer.
-My documentation CI does not need these credentials, so I have not uploaded them
-to GitHub Actions secrets.
+Restoring the database preserves 3x-ui subscription IDs when public host/port/paths
+remain unchanged. It does not recreate Marzban signing-token semantics. The
+proposed ten-minute rollback target requires measurement, not assumption.
 
-## Restore in isolation first
+## Recovery archive contents
 
-1. On an isolated VPS, install the same official Marzban release. Stop it before
-   replacing its data. I'll preserve any destination state I might still need.
-2. Decrypt and inspect the archive privately. For the manual copy above, the paths
-   start with `opt/marzban`, `var/lib/marzban` and `root/.acme.sh`. I'll extract to
-   a private staging directory and check paths/link targets before placing the
-   files back at those locations. I won't extract an unchecked archive into `/`.
-3. Restore the complete database and matching configuration, ownership and
-   restrictive permissions. Keep restored cron jobs disabled, along with any bot
-   polling or delivery. The clone must not renew production certificates, update
-   live DNS or expose copied user access.
-4. Keep the clone's firewall private. Start with `sudo marzban restart --no-logs`.
-   Copying files does not reload the application.
-5. Check SQLite integrity, administrator login, users, quotas, inbound assignments,
-   existing subscription tokens and client traffic. On my test workstation, I can
-   temporarily resolve the original hostname to the clone while keeping public
-   DNS unchanged. I'll record the versions, result and recovery time privately.
+The bundle includes a consistent SQLite snapshot, additional database-directory
+state, TLS releases, ACME account/configuration, Compose/private host settings,
+host tasks, the relevant ACME cron entry, image identity metadata and this guide.
+Image payloads are delivered separately and linked by bundle ID. Keep every image
+bundle referenced by retained recovery snapshots.
 
-For a real replacement, I'll switch DNS only after the restoration checks,
-including the certificate served on both ports. I'll review and deliberately
-reenable the required renewal schedule; I won't overwrite an unrelated root
-crontab wholesale. For a planned migration, I'll freeze user changes and take a
-final consistent copy before switching.
-
-## Why a list of users isn't enough
-
-I need the complete database, including proxy credentials, user state, assignments,
-Host Settings and the subscription signing secret. Recreating matching usernames
-does not preserve all of that and can invalidate old links. The public hostname,
-port, subscription path and signing state also need to survive. I'll verify an
-already issued subscription, not just create a new user and call the restore done.
+Historical encrypted files under `~/.local/share/mirage/` remain recovery material,
+not the new runtime token source. Retain an independent archive copy and its key
+separately. Marzban rollback still requires its A-13 image, core, signing state,
+configuration and external scripts; see [Migration](migration.md#migration-to-3x-ui).

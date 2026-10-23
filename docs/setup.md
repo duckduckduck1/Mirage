@@ -1,247 +1,141 @@
-# Installing my VPN on a fresh VPS
+# Setup
 
-[README](../README.md) · [Maintenance](operations.md) · [Recovery](recovery.md)
+[README](../README.md) · [Operations](operations.md) · [Recovery](recovery.md) · [Migration](migration.md)
 
-**Proposed recipe, not an installation result.** Source review: 2026-10-23.
-This is the procedure I plan to try on a separate fresh VPS. My
-[existing server](migration.md) has different dependencies and subscription
-identity to preserve; I have not changed it as part of these notes.
+**Status: candidate configuration, not deployed or accepted.** Server preparation
+requires separate authorization. Keep the existing Marzban deployment running
+throughout the isolated test.
 
-## What I chose
+## Requirements and versions
 
-| Item | Choice |
-| --- | --- |
-| Host | Fresh Ubuntu 24.04 LTS VPS with administrative SSH access |
-| Application | Official Marzban v0.8.4 image, bundled Xray, SQLite |
-| Client connection | One Trojan TCP/TLS inbound on TCP 443 |
-| Dashboard and subscriptions | Marzban's own HTTPS listener on TCP 8443 |
-| Certificate | Let's Encrypt through acme.sh, standalone HTTP validation |
-| Example hostname | `vpn.example.com`, replaced everywhere with my domain |
+- Linux host with Docker Engine and Compose v2+, Python 3.10+, OpenSSL, age and age-keygen.
+- Administrative SSH access, a valid DNS hostname and its existing trusted certificate.
+- At least 512 MiB `MemAvailable`, free test ports and disk space for image archives.
+- A fresh recovery copy of the repaired Marzban installation before server changes.
 
-I picked Trojan for this first draft because it uses ordinary TLS and avoids the
-REALITY subscription `sid` issue below. That made the example smaller; it did not
-establish which protocol works better on my networks. I should not replace my
-working REALITY profiles with this recipe just to simplify the guide.
+The [example environment](../.env.example) pins official 3x-ui v3.10.2 and a Caddy
+candidate by digest. Replace the Caddy candidate with the actual inventoried
+working version/digest before production. Its sample version comes from the
+archived template, not a current server inspection.
 
-With Trojan I need my own certificate for the proxy connection. REALITY has a
-different handshake and target setup; it does not require my own proxy certificate.
-These are different choices, not a reliability ranking for Russia. The designs
-are described in the [Trojan protocol](https://trojan-gfw.github.io/trojan/protocol)
-and [REALITY documentation](https://github.com/XTLS/REALITY/blob/main/README.en.md).
-I need client tests on the actual networks before choosing a migration target.
-The [official v0.8.4 release](https://github.com/Gozargah/Marzban/releases/tag/v0.8.4)
-is my candidate for this recipe; I have not tested it here. I will review the
-release again before installing. I have not included REALITY in this setup; its
-`sid` compatibility issue still matters for my [existing deployment](migration.md#reality-subscription-limitation).
+The upstream [Compose file](https://github.com/MHSanaei/3x-ui/blob/v3.10.2/docker-compose.yml)
+builds the application locally. This repository instead consumes its official
+image. The extracted amd64 core reports Xray 26.10.10; the upstream release/tag
+was unavailable, while the reported source commit exists. See the
+[candidate review](../audit/3x-ui-candidate.md). Validate the actual container/core
+and client compatibility before cutover. Do not replace the core inside the image.
 
-## 1. Prepare the domain and ports
+## Test isolation
 
-I need a DNS-only A record pointing my hostname to the new VPS. I will leave out
-AAAA unless I also configure and test IPv6. A CDN proxy is not part of this direct
-TCP setup.
-
-My provider and host firewalls need these incoming TCP connections:
-
-| TCP port | Access | Purpose |
+| Connection | Test port | Production port |
 | --- | --- | --- |
-| My SSH port | My administration network | Administration |
-| 80 | Internet | Certificate issuance and future HTTP renewals |
-| 443 | Internet | Trojan client traffic |
-| 8443 | Internet, after TLS is configured | Dashboard and subscriptions |
+| VLESS TCP REALITY | 24443 | 443 |
+| VLESS gRPC REALITY | 28443 | 8443 |
+| VLESS XHTTP REALITY | 22053 | 2053 |
+| Trojan TCP TLS | 29443 | 9443 |
+| Caddy HTTPS subscriptions | 22096 | 2096 |
+| Administrative panel, loopback | 12080 | 12080 |
 
-I will keep 8000 and other unneeded inbound ports closed. Port 80 must be free for
-acme.sh to bind during issuance and renewal. Outbound package downloads, DNS,
-ACME requests and proxied client traffic must be allowed. This assumes a fresh
-host without another web server or existing Marzban installation.
+Use a separate Compose project, bridge network and data directories. Never share
+production SQLite or writable Marzban directories. The two services are capped
+at 320 and 64 MiB, with no additional swap budget. Stop the test on memory pressure,
+OOM or degradation of the existing VPN. An occupied test port blocks preparation.
 
-## 2. Install Marzban and open the initial dashboard
+Place the checkout at `/opt/mirage`. Create root-owned mode 0700 directories
+`/etc/mirage-test`, `/var/lib/mirage-test`, and its `db` and `tls` subdirectories.
+Copy `.env.example` to `/etc/mirage-test/compose.env`, mode 0600, and configure the
+real hostname. Use literal, unquoted KEY=value entries for the host helpers.
 
-On the **new VPS**, I first need `curl`:
+Copy `infra/host.example.json` to `/etc/mirage-test/host.json`, mode 0600. Set
+`env_file=/etc/mirage-test/compose.env` and `state_dir=/var/lib/mirage-test`; its
+hostname must match the Compose environment. Do not enable test ACME/DNS jobs.
+Configure `acme_dir` only for a deliberate recovery drill with copied state and
+disabled renewal schedules. Runtime tokens are delivered from GitHub as described
+in [Operations](operations.md#secret-management).
 
-```bash
-sudo apt update
-sudo apt install -y curl
-```
+The default `BIND_IP=127.0.0.1` prevents public access during preparation. After
+credentials and inbounds are checked, change it to the public IPv4 listener and
+allow only the test TCP ports in both host and provider firewalls. Check Docker's
+actual published-port rules; a host firewall frontend alone may not block them.
+IPv6 remains unpublished until separately configured and tested.
 
-After reviewing the [official installer](https://github.com/Gozargah/Marzban-scripts/blob/master/marzban.sh),
-I will run its install command with an explicit image version:
+## Bootstrap and first login
 
-```bash
-sudo bash -c "$(curl -fsSL https://github.com/Gozargah/Marzban-scripts/raw/master/marzban.sh)" @ install --version v0.8.4
-```
-
-The upstream script installs Docker if needed and supplies its own Compose file.
-It downloads a moving installer and templates; the image version does not pin
-those files. Ctrl+C stops following the installation logs without stopping the
-detached service. If it offers to overwrite an installation, I will stop here.
-
-In `sudo marzban edit-env`, I will replace these entries rather than append
-duplicates, and leave `UVICORN_UDS` unset:
-
-```dotenv
-UVICORN_HOST = "127.0.0.1"
-UVICORN_PORT = 8000
-DEBUG = false
-DOCS = false
-XRAY_JSON = "/var/lib/marzban/xray_config.json"
-SQLALCHEMY_DATABASE_URL = "sqlite:////var/lib/marzban/db.sqlite3"
-```
-
-Then I will apply the settings and create my administrator interactively:
+Copy the working certificate pair to private staging without changing its existing
+consumers. The helper requires a matching hostname/key, trusted chain and at least
+seven days of remaining validity. Bootstrap the managed certificate directory:
 
 ```bash
-sudo chmod 600 /opt/marzban/.env
-sudo chmod 700 /var/lib/marzban
-sudo marzban restart --no-logs
-sudo marzban cli admin create --sudo
+sudo python3 /opt/mirage/infra/tls.py --config /etc/mirage-test/host.json \
+  --certificate /PRIVATE_STAGING/fullchain.pem --key /PRIVATE_STAGING/key.pem --publish-only
+sudo docker compose --env-file /etc/mirage-test/compose.env pull --policy always
+sudo docker compose --env-file /etc/mirage-test/compose.env up -d x-ui
+sudo docker compose --env-file /etc/mirage-test/compose.env exec -T x-ui /app/x-ui -v
+sudo docker compose --env-file /etc/mirage-test/compose.env exec -T x-ui /app/bin/xray-linux-amd64 version
 ```
 
-On **my workstation**, I will replace the SSH placeholders and keep this tunnel
-open:
+The core path is for amd64; verify the image architecture first. No archived
+installer or host bootstrap is required. Images use `pull_policy: never` during
+normal startup so pulls and version changes remain deliberate.
+
+Open an administration tunnel from the workstation:
 
 ```bash
-ssh -N -L 8000:127.0.0.1:8000 ADMIN_USER@SERVER_HOST
+ssh -N -L 12080:127.0.0.1:12080 ADMIN_USER@SERVER_HOST
 ```
 
-I should then be able to sign in at `http://127.0.0.1:8000/dashboard/`. I will
-keep the administrator password in my password manager.
+Open `http://127.0.0.1:12080/`, replace default credentials immediately and enable
+TOTP. Keep panel base path `/` for the reviewed secret-delivery helper. The panel
+is published only on host loopback and is not routed through Caddy.
 
-## 3. Obtain and install the certificate
+## Panel configuration
 
-On the **new VPS**, I will use a root shell for certificate setup. After reviewing
-the [acme.sh installer and renewal behavior](https://github.com/acmesh-official/acme.sh),
-I will replace the example email and hostname and run:
+Configure the native panel before public exposure:
 
-```bash
-sudo -i
-apt install -y socat cron
-systemctl enable --now cron
-curl -fsSL https://get.acme.sh | sh -s email=admin@example.com
-/root/.acme.sh/acme.sh --issue --server letsencrypt --standalone -d vpn.example.com --keylength ec-256
-install -d -m 700 /var/lib/marzban/certs
-umask 077
-/root/.acme.sh/acme.sh --install-cert --ecc -d vpn.example.com \
-  --key-file /var/lib/marzban/certs/key.pem \
-  --fullchain-file /var/lib/marzban/certs/fullchain.pem \
-  --reloadcmd '/usr/local/bin/marzban restart --no-logs'
-exit
-```
-
-The install command copies certificates into the directory mounted by upstream
-Compose and saves the reload command for renewal. It also runs that command now.
-The root acme.sh installation schedules renewal through root's crontab. I'll
-inspect it privately to confirm the entry exists before relying on it.
-
-**Renewal restarts Marzban and interrupts active connections.** This recipe
-accepts that interruption to reload both the application and Xray certificates;
-I am not promising uninterrupted renewal.
-`--no-logs` lets the renewal command finish instead of following logs forever.
-Actual scheduled renewal and the certificates served afterwards remain untested.
-
-## 4. Enable HTTPS for the dashboard and subscriptions
-
-In `sudo marzban edit-env`, I will change the listener settings and add my
-certificate paths and public subscription address:
-
-```dotenv
-UVICORN_HOST = "0.0.0.0"
-UVICORN_PORT = 8443
-UVICORN_SSL_CERTFILE = "/var/lib/marzban/certs/fullchain.pem"
-UVICORN_SSL_KEYFILE = "/var/lib/marzban/certs/key.pem"
-XRAY_SUBSCRIPTION_URL_PREFIX = "https://vpn.example.com:8443"
-```
-
-I need to replace the hostname, keep `UVICORN_UDS` unset and retain the other
-settings from step 2. After `sudo marzban restart --no-logs`, I will allow public
-TCP 8443 and open `https://vpn.example.com:8443/dashboard/`. Once the browser trusts
-the certificate and login works, I can close the SSH tunnel. I will resolve any
-certificate errors rather than bypass them.
-
-This choice publicly exposes the HTTPS dashboard and API alongside subscriptions,
-so I need a strong unique administrator password. Keeping the dashboard private
-would need a different exposure design. Upstream documents these
-[native TLS settings](https://gozargah.github.io/marzban/en/examples/marzban-ssl).
-
-## 5. Add the one client inbound
-
-In the dashboard's **Core Settings**, I will use the JSON below, replacing
-`vpn.example.com`. It combines the
-[upstream base configuration](https://github.com/Gozargah/Marzban/blob/v0.8.4/xray_config.json)
-with its [Trojan TCP TLS inbound](https://gozargah.github.io/marzban/en/docs/xray-inbounds#tls).
-This replacement is for my fresh installation only; it would discard other inbounds.
-
-```json
-{
-  "log": {"loglevel": "warning"},
-  "routing": {
-    "rules": [
-      {"type": "field", "ip": ["geoip:private"], "outboundTag": "BLOCK"}
-    ]
-  },
-  "inbounds": [
-    {
-      "tag": "TROJAN TCP TLS",
-      "listen": "0.0.0.0",
-      "port": 443,
-      "protocol": "trojan",
-      "settings": {"clients": []},
-      "streamSettings": {
-        "network": "tcp",
-        "security": "tls",
-        "tlsSettings": {
-          "serverName": "vpn.example.com",
-          "minVersion": "1.2",
-          "certificates": [
-            {
-              "certificateFile": "/var/lib/marzban/certs/fullchain.pem",
-              "keyFile": "/var/lib/marzban/certs/key.pem"
-            }
-          ]
-        }
-      }
-    }
-  ],
-  "outbounds": [
-    {"protocol": "freedom", "tag": "DIRECT"},
-    {"protocol": "blackhole", "tag": "BLOCK"}
-  ]
-}
-```
-
-After saving/applying in the panel, I will check `sudo marzban status` and
-`sudo marzban logs` for startup or certificate errors. Marzban populates `clients`
-from its database, so I will leave that array empty in the base JSON.
-
-In **Host Settings**, I will set the host for `TROJAN TCP TLS`:
-
-| Field | Value |
+| Setting | Value |
 | --- | --- |
-| Remark | `Personal VPN` |
-| Address | My hostname, replacing `vpn.example.com` |
-| Port | `443` |
-| SNI | The same hostname |
-| Security layer | TLS |
+| Panel port | 12080; also forced by `XUI_PORT` |
+| Panel listener | All container interfaces; host publication remains loopback |
+| Subscription enabled | Yes |
+| Subscription listener / port | All container interfaces / 12081 |
+| Raw / Xray JSON paths | `/sub/` / `/json/` |
+| Native subscription TLS | Disabled; Caddy terminates HTTPS |
+| Public subscription URI | Actual HTTPS hostname and current test port |
+| Advertised proxy addresses | Actual public host/IP, never a container address |
+| Fail2ban / IP limits | Disabled |
+| Built-in plaintext bot backup | Disabled |
 
-I will leave unrelated transport overrides at their defaults. These fields determine
-the generated client profiles; see upstream
-[Host Settings](https://gozargah.github.io/marzban/en/docs/host-settings).
+The [subscription listener](https://docs.sanaei.dev/docs/config/subscription/) is
+separate from the panel. Verify generated addresses and ports; do not assume
+forwarded headers choose the correct public endpoint. Caddy exposes `/sub/*` and
+`/json/*`; other paths, including panel/API routes, return 404. Its admin endpoint
+is container-local and unpublished.
 
-## 6. My first user and client test
+## Inbounds and users
 
-1. I will create one test user, enable Trojan and assign only `TROJAN TCP TLS`,
-   with an explicit quota and expiry.
-2. I will copy that user's HTTPS subscription link from the dashboard and check
-   that it uses my hostname and port 8443. The whole URL is a credential.
-3. I will add it as a remote subscription in Hiddify or Karing, refresh and select
-   the Trojan profile. Those clients were used on my older setup; I have not
-   tested their current versions with this recipe.
-4. I will check the imported address, port 443, TLS and matching SNI, leaving
-   certificate verification enabled. For traffic from other applications, I need
-   the client's system VPN/TUN mode and a test outside the client itself.
-5. I will repeat on the networks I need, including mobile data and the relevant
-   Wi-Fi, and record the results. An open port or successful import is insufficient.
+Recreate the four existing inbounds through native 3x-ui tools. Preserve protocol,
+security, REALITY keys/SID/SNI/client-version bounds, flow, gRPC service name,
+XHTTP path/mode, TLS and required routing behavior. Set actual inbound ports to
+the test ports: Compose maps each port to itself. Retain 3x-ui's own API/statistics
+plumbing; do not replace its complete core configuration with Marzban's output.
 
-Before giving friends access, I need an [external recovery copy](recovery.md),
-an isolated restoration test and a renewal/reload test in a maintenance window.
-I will record the actual image digest, bundled Xray and client versions and the
-results privately. These checks are still pending for this recipe.
+Trojan reads `/certs/current/fullchain.pem` and `/certs/current/key.pem` from the
+read-only parent mount. Set `oneTimeLoading=false` and test certificate
+reloading with the actual candidate core before claiming uninterrupted renewal.
+
+Create one client per person, attach four inbounds and preserve UUID, Trojan
+password, status, expiry and remaining quota. Unlimited remains unlimited.
+Never encode an exhausted finite allowance as zero/unlimited: keep the client
+disabled with its finite limit recorded until more traffic is deliberately granted.
+Historical usage remains in the legacy archive. Do not import Marzban SQL tables
+or signing tokens. Leave friends' Telegram IDs unlinked for admin-only operation.
+
+Start the configured services:
+
+```bash
+sudo docker compose --env-file /etc/mirage-test/compose.env up -d
+```
+
+Complete the [acceptance matrix](migration.md#migration-to-3x-ui), including
+client traffic, cold starts, TLS and recovery. Do not enable timers or distribute
+candidate subscriptions before their corresponding checks pass.

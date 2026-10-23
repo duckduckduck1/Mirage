@@ -1,181 +1,163 @@
-# My existing server
+# Migration from Marzban
 
-[Back to README](../README.md)
+[README](../README.md) · [Setup](setup.md) · [Operations](operations.md) · [Recovery](recovery.md)
 
-## Why these notes are separate
+**Status: repository preparation only. No 3x-ui server migration performed.**
+Historical checks below apply to Marzban. They are not acceptance of the new setup.
 
-My main guide now describes a proposed fresh installation. My running VPS still
-uses the earlier setup, so I need these notes until I migrate it. Its source is at
-[`legacy-ansible-2026-10-23`](https://github.com/duckduckduck1/Mirage/tree/legacy-ansible-2026-10-23),
-which points to commit `bf3c47e90f7b1be7898f8be14f6658ced7d0db32` and includes
-the Caddy forced-reload repair.
+## Existing deployment
 
-After maintenance on 2026-10-24, my existing deployment has:
+Observed after maintenance on 2026-10-24:
 
-| Component | Observed configuration |
+| Component | Configuration |
 | --- | --- |
 | OS | Ubuntu 22.04 |
-| Marzban | v0.8.4 with the temporary A-13 image patch, SQLite |
-| Xray | v26.7.28 through `XRAY_EXECUTABLE_PATH` |
-| Transports | TCP REALITY 443, gRPC REALITY 8443, XHTTP REALITY 2053, Trojan TLS 9443 |
-| Panel and subscriptions | Caddy HTTPS on 2096, proxying to Marzban's Unix socket |
-| Certificates and DNS | External ACME/DNS-01 certificate and a DuckDNS updater |
+| Panel | Marzban v0.8.4, A-13 derivative, SQLite |
+| Core | Xray v26.7.28 through `XRAY_EXECUTABLE_PATH` |
+| Transports | TCP REALITY 443; gRPC REALITY 8443; XHTTP REALITY 2053; Trojan TLS 9443 |
+| Panel/subscriptions | Caddy HTTPS 2096 to Marzban's Unix socket |
+| Certificates/DNS | Host acme.sh DNS-01 and DuckDNS updater |
 
-My configuration, credentials, addresses and archives remain outside Git. Removing
-the old source files does not remove installed services or their dependencies.
-I will use the tag and private recovery material when planning changes, rather
-than rerun the archived bootstrap on my live VPS.
+Legacy source is preserved at
+[`legacy-ansible-2026-10-23`](https://github.com/duckduckduck1/Mirage/tree/legacy-ansible-2026-10-23),
+commit `bf3c47e90f7b1be7898f8be14f6658ced7d0db32`, including the Caddy forced-reload
+repair. Credentials, infrastructure addresses and recovery material are private.
+Removing repository automation does not remove installed services or dependencies.
 
-Earlier operating evidence is retained in the [ledger](../audit/acceptance-ledger.md).
-On 2026-10-23, Caddy's served certificate was repaired by adding `--force` to its
-reload command. The earlier hook had skipped an unchanged Caddyfile and continued
-serving the previous certificate. The hook still restarts Marzban on renewal;
-that behavior can interrupt VPN traffic and requires separate investigation.
+### Maintenance evidence: 2026-10-23
 
-The same audit found a legacy backup timer failing and SQLite readable by other
-local accounts. Those two issues were addressed in the separate maintenance below.
-Backup delivery and a fresh full restoration drill were not established by the
-audit or by the repository cleanup.
+- Forced Caddy reload corrected an old certificate still served despite renewed
+  files. The existing hook still restarts Marzban on renewal and can interrupt traffic.
+- Four active users passed twelve generic/Hiddify/Karing subscription requests.
+  Generic output had four profiles; Hiddify/Karing had three. The installed
+  sing-box generator explicitly excludes XHTTP.
+- All four transports passed HTTPS with a temporary server-loopback client.
+  Those checks did not establish reachability from affected external networks.
+- An encrypted external recovery copy passed decryption, archive and SQLite
+  integrity checks. Full restoration remains untested. Data permissions were
+  restricted to directory 0700/database 0600; the obsolete 3x-ui backup timer was
+  disabled. Native Marzban backup delivery was not retested.
+- A separate failed Certbot lineage still has configuration references. Its role
+  must be established before removal; it does not own the working acme.sh certificate.
 
-## What I checked on 2026-10-23
+### Maintenance evidence: 2026-10-24
 
-For the existing deployment, all four users were active. Twelve subscription
-requests succeeded: four users in generic, Hiddify and Karing formats. Their
-ports, transports and REALITY short IDs matched the server settings. Generic
-output contained four profiles; Hiddify and Karing each received three.
+A REALITY failure was reproduced with the old server and newer client, including
+through SSH, without requiring ISP filtering or TUN. Xray v26.7.28 defaults reject
+older REALITY clients. The approved repair upgraded the server from v24.12.31,
+explicitly retained `minClientVer=1.8.0` and supplied the existing public keys.
+Marzban v0.8.4 cannot parse modern x25519 output; automatic key generation remains
+limited. See [upstream issue #1938](https://github.com/Gozargah/Marzban/issues/1938).
 
-The installed sing-box generator explicitly skips XHTTP. That explains why I
-cannot count it as a usable fourth profile in those subscriptions. A temporary
-Xray client on the VPS passed HTTPS traffic through all four existing inbounds,
-including XHTTP. This was a loopback test on the server, not a test through MTS,
-Beeline or the university Wi-Fi. I still need matching client/network observations
-to explain failures on those paths.
+The restart preserved A-13, users, credentials, signing state, ports and URLs.
+Caddy did not restart. Previous core/configuration remain available for rollback;
+the earlier encrypted archive restores the pre-update state.
 
-The certificates served on Trojan and the public subscription listener matched
-the installed file, with expiry on 2026-12-25. The running Xray was still
-v24.12.31. These checks did not establish a reason to reinstall Marzban or discard
-the working REALITY profiles.
+Verified after restart:
 
-Before maintenance, I obtained an encrypted external copy with a consistent
-SQLite snapshot, the current image and required configuration/scripts. Decryption,
-archive checks and SQLite integrity passed; full restoration remains untested.
-I then restricted the data directory to `0700` and SQLite to `0600`, and disabled
-the obsolete 3x-ui backup timer. The native Marzban backup schedule was preserved;
-delivery was not retested. The same twelve subscription URLs and their profile
-parameters passed before and after. User credentials and signing state were
-unchanged, and neither working container restarted.
+- Sixteen subscription responses: four users × generic, Hiddify, Karing and
+  Xray JSON. Private connection parameters matched before/after. Profile counts
+  were four, three, three and four respectively.
+- The existing Throne subscription returned HTTP 200 with an identical body.
+- Sixteen server-loopback user/transport combinations passed HTTPS traffic.
+- Laptop physical-Wi-Fi tests passed all four profiles with both Xray v24.12.31
+  and v26.7.28; official sing-box v1.13.16 passed TCP, gRPC and Trojan.
+- XHTTP downloaded exactly 1 MiB and passed three repeated HTTPS requests.
+  These fifteen external checks did not change the active GUI VPN.
+- The running container used the new core. Served Trojan/subscription certificates
+  matched installed files and expire on 2026-12-25; no startup traceback was observed.
 
-A failed Certbot service also manages a separate expired webroot certificate,
-with references still present in configuration. I left it in place until I can
-establish its purpose; I have not treated it as the owner of the working
-acme.sh-managed VPN certificate.
+Throne GUI/TUN endurance, Beeline, campus Wi-Fi and mobile allowlists remain
+unconfirmed. Full replacement-panel acceptance is separate from this repair.
 
-My next transport decision needs tests from an affected client network. The
-single-Trojan fresh-install example is not a plan to remove my working VLESS
-profiles. I will stop before any maintenance that requires restarting a working
-VPN service and discuss the interruption first.
+### A-13 and historical clients
 
-## What I changed and checked on 2026-10-24
+Official Marzban v0.8.4 can omit REALITY `sid` in the first subscription after
+startup. A-13 applies the one-line change from
+[PR #2036](https://github.com/Gozargah/Marzban/pull/2036), described in
+[issue #1986](https://github.com/Gozargah/Marzban/issues/1986). Replacing it with an
+unmodified image requires cold-start and repeated-subscription checks first.
 
-I reproduced a REALITY compatibility failure: the existing server passed all four
-profiles with Xray v24.12.31, while a separate v26.7.28 client passed only Trojan.
-The same failure occurred through an SSH tunnel, so reproducing this particular
-failure did not require ISP filtering or TUN mode. This does not explain every
-reported client or network interruption.
+Historical acceptance on **2026-07-28** confirmed TCP REALITY, gRPC REALITY and
+Trojan in Hiddify/Karing. XHTTP was not working in those client tests. V2RayTun,
+V2Box, Streisand and OneXray were not confirmed. Exact client/OS builds were not
+retained, and automatic-failover/multi-network acceptance was incomplete. See the
+[historical ledger](../audit/acceptance-ledger.md). Do not generalize these results
+to current clients or the proposed installation.
 
-I tested Xray v26.7.28 on localhost before applying it. Its
-[default minimum REALITY client version](https://github.com/XTLS/Xray-core/blob/v26.7.28/infra/conf/transport_security.go#L118)
-rejects older Xray and sing-box clients. I explicitly set `minClientVer` to
-`1.8.0` to retain those clients. I also added each existing REALITY public key
-explicitly. Marzban v0.8.4 cannot parse modern `x25519` command output; providing
-`publicKey` lets its configuration loader resolve these existing inbounds. The
-upstream parsing problem is recorded in
-[issue #1938](https://github.com/Gozargah/Marzban/issues/1938). Automatic key
-generation through the old panel remains a limitation; I did not patch its code.
+## Migration to 3x-ui
 
-After a fresh consistent SQLite snapshot, I replaced only the pinned core and
-prepared configuration, then restarted Marzban with explicit approval. The A-13
-image stayed in place. Ports, users, credentials, signing state and connection
-parameters stayed the same. Caddy did not restart. The old core and configuration
-were retained privately for rollback; the earlier encrypted recovery bundle
-restores the pre-update core and configuration.
+Target: official prebuilt 3x-ui, SQLite and Caddy under Compose. No application
+fork, submodule or custom build. [Candidate review](../audit/3x-ui-candidate.md)
+records local artifact checks only.
 
-My checks after the working restart passed:
+### Preparation and isolated test
 
-- Sixteen subscription responses: four users in generic, Hiddify, Karing and
-  explicit Xray JSON formats. Connection parameters matched the responses saved
-  before the change. Generic and Xray output had four profiles; Hiddify/Karing
-  still had three because their installed generator excludes XHTTP.
-- The exact existing subscription URL saved in Throne returned HTTP 200 and an
-  identical response body before and after the restart.
-- All sixteen user/transport combinations passed an HTTPS request through the
-  working server using temporary clients on VPS loopback.
-- Separate Xray v24.12.31 and v26.7.28 clients passed all four profiles from the
-  laptop through its physical Wi-Fi interface. Official sing-box v1.13.16 passed
-  TCP REALITY, gRPC REALITY and Trojan on the same path.
-- XHTTP with the modern Xray client downloaded exactly 1 MiB and passed three
-  additional HTTPS requests. These fifteen laptop checks used the live public
-  server; the active GUI VPN configuration was left alone.
-- The running container used the new core. Trojan and subscription TLS remained
-  trusted, matched the installed certificate and expire on 2026-12-25. No startup
-  traceback was observed.
+Server access requires separate authorization. Inventory current images, ports,
+jobs, ownership, memory and disk. Obtain a fresh encrypted recovery set of the
+repaired Marzban, A-13 image, Xray v26.7.28, SQLite/signing state, configuration,
+TLS/ACME, Caddy and four external maintenance scripts. The older archive is not a
+fresh recovery copy of the repaired core.
 
-These are successful traffic checks, not sustained Throne TUN acceptance or a
-test of Beeline, university Wi-Fi or mobile allowlists. The new-install recipe in
-the main guide also remains untested. I will assess a replacement for the old
-panel separately from this repair.
+Keep existing services running while the candidate uses separate data/network,
+alternate ports and a new bot. Require 512 MiB available memory; stop on pressure,
+OOM or degradation. Do not change production DNS, ACME hooks or the active GUI VPN
+for testing. Several transports on one IP do not provide independent IP redundancy.
 
-## REALITY subscription limitation
+Transfer all users through native tools. Preserve UUID/password, state, expiry,
+remaining quota and four assignments; do not import Marzban tables or its entire
+core output. Preserve transport identity and routing requirements. Test actual
+and advertised ports must agree. Never map exhausted finite quota to unlimited.
 
-The official Marzban v0.8.4 subscription code can omit the REALITY `sid` in the
-first generated profile after application startup. The existing A-13 derivative
-applies the one-line change from
-[upstream PR #2036](https://github.com/Gozargah/Marzban/pull/2036), also described
-in [issue #1986](https://github.com/Gozargah/Marzban/issues/1986).
+### Acceptance matrix
 
-I cannot replace A-13 with an official image just because the version label
-matches. First I need to inspect the candidate and test the first subscription
-after a cold start, repeated responses and the formats my clients consume. I'll
-compare REALITY parameters privately. I can retire A-13 once those tests pass and
-I have a way to restore the previous image and data.
+| Check | Required evidence |
+| --- | --- |
+| Artifact | Exact image digest, architecture, revision and actual core; unexplained mismatch blocks cutover |
+| Users/traffic | Every user through each of four transports; real HTTPS payload |
+| XHTTP | Repeated connections and file download with exact byte count |
+| Subscriptions | Raw/Base64 and Xray JSON; private field comparison, first response after cold start and repeats |
+| Throne | Four profiles, refresh, system proxy, TUN, sleep and Wi-Fi reconnect |
+| Hiddify/Karing | Import, refresh and supported-profile traffic; XHTTP needs a separate positive test |
+| Recreate | Database, settings and issued 3x-ui links survive container replacement |
+| Telegram | Owner admin access, rejection of foreign admin actions, one poller |
+| TLS | Both served certificates update; active transfer continues without VPN restart |
+| Recovery | Downloaded encrypted parts and matching images restore users, links and traffic in isolation |
+| Observation | At least 48 hours without unexplained restarts or growing memory |
 
-## Historical client observations
+Record actual client/core versions and test paths privately. Beeline, campus and
+allowlist claims require observations from those networks.
 
-These are observations from the legacy acceptance on 2026-07-28, not support
-claims for current application releases or the new setup. Exact client/OS build
-numbers are not retained in the public ledger, so I need to retest my actual versions.
+### Cutover
 
-| Client | TCP REALITY | gRPC REALITY | Trojan TLS | XHTTP REALITY |
-| --- | --- | --- | --- | --- |
-| Hiddify | Traffic confirmed | Traffic confirmed | Traffic confirmed | Not working in that test |
-| Karing | Traffic confirmed | Traffic confirmed | Traffic confirmed | Not working in that test |
-| V2RayTun, V2Box, Streisand, OneXray | Not confirmed | Not confirmed | Not confirmed | Not confirmed |
-| Pinned Xray-core test client | Not tested | Not tested | Not tested | Server-side end-to-end check passed |
+After acceptance and explicit authorization for interruption, reserve up to
+30 minutes. Freeze administrative writes, take fresh consistent copies of both
+systems and reconcile final users, expiry and quota balances. Stop the test and
+prepare separate production data with the original ports. Retain the old images,
+database/configuration, Caddy and ACME reload-hook together.
 
-The server-side XHTTP check did not establish reachability from an external client
-network. HTTP subscription checks on 2026-10-23 confirmed four generic profiles
-and three supported profiles in each Hiddify/Karing response; they were not new
-VPN traffic tests. The old multi-network and automatic-failover matrix was not
-completed. Having several profiles in a subscription does not by itself configure
-or prove automatic switching in a client.
+Stop Marzban and old Caddy to free their ports, then start the new Compose project.
+Immediately check TLS, both subscription formats and every user/transport. If
+initial acceptance is not successful within ten minutes, roll back.
 
-## What I need before migrating
+URLs and administrative API change to native 3x-ui interfaces. Marzban token/API
+compatibility is not implemented. Retrieve new subscriptions through the admin
+bot and distribute them privately. Retain old subscriptions in clients for
+rollback. Preserved cached credentials are not subscription-URL compatibility.
+The four VPN ports and validated credentials remain unchanged.
 
-Before changing my server, I need an inventory, a verified external recovery
-bundle and a test of the candidate in isolation. The
-[recovery guide](recovery.md) explains the data that must survive.
+### Rollback and observation
 
-I need to preserve the complete database, signing secret, user state, proxy
-credentials, inbound assignments and Host Settings. The public subscription URLs
-and validation of previously issued tokens must survive too. I'll keep the
-working transport parameters until I test the relevant clients; the new guide's
-default paths and ports cannot replace the old ones without that preparation.
+Roll back immediately on missing users, incorrect credentials/TLS, transport
+regression or unstable processes. Stop the new project, preserve diagnostics,
+and restore matching Marzban/Caddy data/images and the ACME hook. Check old links
+and all transports; restore the saved client subscription where needed. New
+3x-ui URLs do not refresh against Marzban. Measure the target of ten minutes from
+the rollback decision in rehearsal.
 
-I'll separate image replacement, transport changes, DNS, certificates and OS
-cleanup so I can check each change. Two instances must not share the production
-SQLite database. If a release migrates it, I need the matching data for rollback,
-not only the previous image.
-
-I will schedule the cutover separately, freeze administrative writes during the
-switch and verify old subscription URLs plus client traffic before retiring
-anything. I need to retain the rollback image and matching data until then.
+Freeze user/access settings for seven days and keep the old deployment stopped.
+For finite quotas on rollback, subtract measured post-cutover usage from the
+cutover remaining balance; do not reset the allowance. After successful observation
+and recovery rehearsal, remove only confirmed obsolete Marzban/A-13 components.
+Establish dependencies before changing ACME, DNS, SSH safeguards or unrelated
+services. Do not broadly prune images or remove ignored project leftovers.
