@@ -70,6 +70,69 @@ Its source is preserved at the
 - These are repository/hosting checks only. They do not change the legacy VPS or
   establish operational acceptance of the documented upstream setup.
 
+## Existing-server maintenance — 2026-10-23
+
+- Before changes, all four active users' subscriptions returned HTTP 200 in
+  generic, Hiddify and Karing formats. Protocol, port, transport and REALITY short
+  ID checks matched server settings. Generic output had four profiles; each
+  sing-box response had three because the installed generator excludes XHTTP.
+- A temporary Xray v24.12.31 client on server loopback passed an external HTTPS
+  request through each of the four existing inbounds. This does not verify any
+  external client network, client application or censorship-resistance claim.
+- Both existing public TLS services presented trusted certificates matching the
+  installed file and expiring on 2026-12-25.
+- An encrypted copy was verified outside the checkout and VPS: consistent SQLite
+  snapshot with four users, application configuration, ACME state, current image
+  and four external maintenance scripts. Ciphertext checksum, GPG decryption and
+  SQLite integrity passed. Full restoration on another VPS was not performed.
+- SQLite permissions became `0600` and the data directory `0700`. The obsolete
+  3x-ui backup timer was disabled; the native Marzban backup cron was preserved.
+  Native backup delivery was not exercised.
+- The same twelve subscription URLs returned HTTP 200 before and after the
+  changes, with identical connection parameters. User/proxy credentials, signing
+  state and assignments were unchanged. Marzban and Caddy container identities,
+  start times and restart counts were unchanged; no working VPN service restarted.
+- A failed Certbot webroot lineage with an expired, different certificate was
+  observed and left unchanged pending identification of its remaining references.
+- Three loose local credential files were moved into a verified encrypted archive
+  outside Git; their plaintext originals were removed after byte comparison.
+  Keys remain in a separate restricted local directory. Independent storage of
+  those copies and password-manager storage of the keys are still owner tasks.
+- This was maintenance of the existing deployment. The proposed new-install
+  recipe has not gained installation, renewal or restoration acceptance.
+
+## Existing-server core repair — 2026-10-24
+
+- Compared all 284 tracked Python backend files with official Marzban v0.8.4 Git
+  blobs: 283 matched; only `app/subscription/share.py` differed by the known A-13
+  short-ID repair. This was a backend source comparison, not a full image audit.
+- Reproduced modern Xray REALITY failures against the old pinned core both
+  directly from the laptop and through SSH. Tested a separate localhost candidate
+  with the installed Marzban API client: 20 user additions, four removals and
+  system statistics succeeded without changing production users or the database.
+- With explicit approval, upgraded the working pinned Xray from v24.12.31 to
+  v26.7.28, added existing `publicKey` values and set REALITY `minClientVer` to
+  `1.8.0`. A fresh SQLite snapshot passed integrity checks. The previous core and
+  configuration were saved privately; the prepared core had already been checked
+  against its official archive checksum. Marzban restarted; Caddy did not.
+- All sixteen subscription requests passed before and after: four active users
+  in generic, Hiddify, Karing and Xray JSON formats. Counts were respectively
+  four, three, three and four per user, with identical connection parameters.
+  User identity, credentials, signing state and recorded assignments were
+  unchanged. The exact old URL in Throne returned an identical response body.
+- All sixteen user/transport combinations passed HTTPS traffic on server
+  loopback. From the laptop's physical Wi-Fi interface, both Xray v24.12.31 and
+  v26.7.28 passed all four transports; official sing-box v1.13.16 passed its three
+  supported profiles. XHTTP also passed a 1 MiB download and three repeated HTTPS
+  requests: fifteen successful external checks in total.
+- Confirmed a running new-core process in the working container. Both public TLS
+  listeners retained trusted certificates matching the installed file, expiring
+  on 2026-12-25. No startup traceback was observed. No rollback was needed.
+- These checks did not operate the Throne GUI, establish sustained TUN stability,
+  test affected Beeline/university/allowlist networks, or accept the proposed fresh
+  installation. Marzban's modern-key automatic parser remains unfixed; explicit
+  public keys avoid that code path for the existing configuration.
+
 ## Evidence policy
 
 Every future entry records the date, tested component versions, non-sensitive

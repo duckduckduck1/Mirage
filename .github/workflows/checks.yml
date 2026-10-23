@@ -19,3 +19,11 @@ jobs:
       - uses: actions/checkout@v5
       - name: Check documentation and accidental secret additions
         run: python3 scripts/check.py
+      - name: Install encryption tool for recovery tests
+        run: sudo apt-get update -qq && sudo apt-get install -y age
+      - name: Exercise host helper failure paths and recovery encryption
+        run: python3 -m unittest discover -s tests -v
+      - name: Validate Compose with safe example settings
+        run: |
+          docker compose --env-file .env.example config --quiet
+          docker compose --env-file .env.example -f compose.yaml -f infra/restore-isolated.yaml config --quiet

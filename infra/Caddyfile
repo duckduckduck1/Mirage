@@ -1,0 +1,17 @@
+{
+	auto_https off
+	admin localhost:2019
+}
+
+https://{$PUBLIC_HOST}:443 {
+	tls /certs/current/fullchain.pem /certs/current/key.pem
+
+	@subscriptions path /sub/* /json/*
+	handle @subscriptions {
+		reverse_proxy x-ui:12081
+	}
+
+	handle {
+		respond 404
+	}
+}

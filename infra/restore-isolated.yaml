@@ -1,0 +1,5 @@
+# Use only while starting a restored clone, until its copied bot is disabled.
+# Combine with compose.yaml and a private TEST environment, never production.
+networks:
+  default:
+    internal: true

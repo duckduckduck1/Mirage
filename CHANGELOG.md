@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026-10-24 — Official 3x-ui deployment candidate
+
+- Replaced the untested fresh Marzban recipe with one Compose using official
+  digest-pinned 3x-ui and Caddy images, isolated ports and private persistent data.
+- Added bounded host tasks for encrypted SQLite/image recovery deliveries and
+  validated TLS publication with forced Caddy reload, without a VPN restart.
+- Added protected GitHub Environment token sources and manual verified-SSH
+  delivery; no application fork, custom image build or permanent local token file.
+- Documented native Telegram administration, acceptance, the seven-day observation
+  period and matching-data rollback. Old Marzban subscription URLs are not promised
+  compatible with 3x-ui. Historical evidence and archives remain intact.
+- Kept source/artifact and local helper checks separate from VPS, client, TLS,
+  restoration and uptime acceptance. No server migration is part of this change.
+
+## 2026-10-24 — Existing-server Xray repair
+
+- Recorded the approved upgrade of the existing pinned core to Xray v26.7.28,
+  explicit REALITY client compatibility and public-key settings, with rollback
+  copies retained privately. The Marzban A-13 image and subscriptions were kept.
+- Recorded successful before/after subscription comparisons, all users' server
+  traffic checks and external tests including an XHTTP 1 MiB download.
+- Kept GUI/TUN, affected-network and fresh-install acceptance explicitly separate
+  from these results. Replacing the panel remains a separate decision.
+
+## 2026-10-23 — Existing-server checks and private recovery files
+
+- Clarified that the Trojan installation example was chosen for a smaller draft
+  and to avoid REALITY subscription handling, not for proven reliability in Russia.
+  Working VLESS profiles remain part of the existing deployment.
+- Recorded subscription and server-loopback transport checks separately from
+  external client/network tests. Kept the new installation explicitly untested.
+- Recorded a verified encrypted recovery copy, restricted data permissions and
+  retirement of the obsolete 3x-ui backup timer without restarting VPN services.
+- Documented local encrypted credential storage outside Git. Full restoration,
+  network-specific failures and the separate old Certbot lineage remain unresolved.
+
 ## 2026-10-23 — Personal runbook
 
 - Refocused README on installation, maintenance and recovery. Kept existing-server

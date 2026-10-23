@@ -1,118 +1,189 @@
-# Looking after my VPN
+# Operations
 
-[README](../README.md) · [Installation](setup.md) · [Recovery](recovery.md)
+[README](../README.md) · [Setup](setup.md) · [Recovery](recovery.md) · [Migration](migration.md)
 
-These are my intended maintenance steps for the new setup. I still need to test
-them on an isolated VPS. My [current server](migration.md) uses a different
-configuration, so I cannot apply the fresh-install settings or replace its image
-without preparing that migration first.
+**Status: prepared procedures, not operational acceptance.** These instructions
+apply to the proposed 3x-ui deployment, not the live Marzban installation.
 
-## Giving someone access
+## Telegram administration
 
-I'll create one Marzban user per person, enable Trojan and assign the
-`TROJAN TCP TLS` inbound. I'll set the quota and expiry deliberately, then send
-the subscription link privately. If a link leaks, I'll revoke or replace that
-person's access through Marzban and check that the old credentials stop working.
+Use a separate native 3x-ui bot with the owner's numeric Telegram ID as the sole
+administrator. Do not reuse the Marzban bot token, link friends' Telegram IDs or
+distribute bot invites. Unlinked accounts can request their ID; verify that they
+cannot perform administrative actions. Native user self-service is not configured.
 
-For the proposed setup, the subscription uses HTTPS on 8443 and contains one
-Trojan profile on 443. I need to check both subscription refresh and actual client
-traffic before sharing it. Adding profiles does not establish automatic failover.
+The bot provides status, client creation, subscriptions and QR codes. Create one
+client per person attached to the four accepted inbounds, with explicit quota
+and expiry. Distribute links privately. See the
+[upstream bot guide](https://github.com/MHSanaei/3x-ui/blob/v3.10.2/docs/content/docs/en/operations/telegram-bot.mdx).
+Only one instance may poll a token.
 
-## Where my configuration lives
+Weekly reports run Sunday at 10:00, Europe/Saratov. Enable Xray crash and CPU/memory
+alerts. Outbound events require configured, tested probes. Keep automatic restart
+on probe failure disabled: a transient external failure must not restart all
+connections. Health checks measure the panel listener, not end-to-end VPN traffic;
+unhealthy status alone does not trigger Docker's restart policy.
 
-| Location | What I need it for |
+A complete VPS outage also disables its bot. Missing daily recovery delivery is
+a warning, not independent availability monitoring. Immediate host-down detection
+requires an external monitor.
+
+## Secret management
+
+GitHub Environment Secrets are the canonical token source. No permanent plaintext
+token files are required on the workstation. Runtime copies remain necessary in
+root-only VPS files and the 3x-ui database. GitHub cannot return stored values
+through its API; delivery must run inside an explicitly authorized Actions job.
+Vault is not required for this deployment.
+
+`vpn-staging` and `vpn-production` allow only `main` and require owner approval.
+Existing credentials are stored in production as `LEGACY_TELEGRAM_BOT_TOKEN` and
+`DUCKDNS_TOKEN`. The legacy Telegram secret is not consumed by the new workflow.
+Historical encrypted recovery archives are retained separately.
+
+Enter these values directly in GitHub Settings → Environments:
+
+| Secret | Purpose |
 | --- | --- |
-| `/opt/marzban/docker-compose.yml` | Official deployment and selected image |
-| `/opt/marzban/.env` | Marzban settings |
-| `/var/lib/marzban/db.sqlite3` | Complete user and subscription state |
-| `/var/lib/marzban/xray_config.json` | Inbound and routing settings |
-| `/var/lib/marzban/certs/` | Certificate and private key used by both listeners |
-| `/root/.acme.sh/` and root's crontab | ACME account, renewal settings and schedule |
+| `TELEGRAM_BOT_TOKEN` | New bot dedicated to 3x-ui |
+| `TELEGRAM_ADMIN_ID` | Positive personal administrator chat/user ID |
+| `SSH_HOST`, `SSH_PORT`, `SSH_USER` | Prepared delivery account |
+| `SSH_PRIVATE_KEY` | Dedicated restricted key, not the personal administration key |
+| `SSH_KNOWN_HOSTS` | Independently verified host key with correct port syntax |
+| `DUCKDNS_TOKEN` | Production DNS/ACME credential; absent in staging |
 
-These are the paths selected in my [installation notes](setup.md), not a reason
-to assume an older installation uses them. I'll keep real settings, links and
-recovery material outside Git, with restricted access.
+Create the bot through BotFather and start its private conversation. Never place
+its token in an issue, command argument or checkout. Store the age recovery
+identity in an independent protected store/password manager, never on the VPS
+or in Telegram.
 
-## When something stops working
+### Manual delivery
 
-On the intended VPS, my first checks are:
+The [delivery workflow](../.github/workflows/secrets.yml) runs only by manual
+dispatch from `main`, after environment approval. It does not install, migrate,
+renew certificates or restart the VPN. PR checks have no runtime secrets.
 
-```bash
-sudo marzban status
-sudo marzban logs
-sudo journalctl -u docker --since '1 hour ago'
-df -h
-free -h
+Before dispatch, separately authorize host preparation. Install a root-owned
+checkout at `/opt/mirage` and prepare private Compose/host settings. Verify SSH
+host identity independently; do not trust an unverified `ssh-keyscan` result.
+Restrict the dedicated key with `restrict` and a forced command:
+
+```text
+sudo -n /usr/bin/python3 /opt/mirage/infra/provision.py --receive staging
 ```
 
-I'll note the time, affected users, network and client version before changing
-settings. Logs may include private links, so I'll redact them before sharing.
+Use `production` for the production key. Grant sudo only for that exact command;
+no arbitrary shell, forwarding or general root access. Use distinct restricted
+keys for the two targets.
 
-| What I observe | What I'll check next |
-| --- | --- |
-| Everyone disconnects together | Container/core restart, renewal time, host reboot, memory and disk |
-| Subscription fails but an imported profile connects | Certificate and HTTPS listener on 8443 |
-| Subscription refreshes but traffic fails | User quota/expiry, inbound state, port 443 and imported address/SNI |
-| Only one client fails | Imported settings, client/core version, VPN/TUN mode and routing |
-| Only one Wi-Fi network fails | Same device/profile on mobile data, then client/server logs from the same attempt |
+With `apply_bot=false`, the workflow updates prepared root-only host settings and,
+in production, `/etc/mirage/secrets/duckdns_token`. It does not edit or run DNS/ACME
+jobs. Wire that credential path to the existing consumers only during the approved
+migration. Unprepared or mismatched targets are rejected.
 
-A successful TCP connection is not proof that TLS or the VPN tunnel works. Before
-blaming filtering, I need evidence of which side received and answered the
-request. A DNS change does not change the destination of an IP-based profile.
+With `apply_bot=true`, it also applies Telegram settings through the native panel
+API on host loopback, preserving other settings. The native CLI supplies a named
+temporary API token into memory; the token is disabled afterwards. Telegram
+values travel in an HTTP body, not process arguments. This source-reviewed path
+requires testing with the actual image. Enabling the bot can send native messages.
+
+SSH key files exist only in the runner's private temporary directory and are
+removed afterwards. Errors suppress SSH/API output. For rotation, change the
+provider token, update the Environment secret and repeat delivery. GitHub outages
+do not stop an already configured VPN.
+
+## Status and logs
+
+From `/opt/mirage` on the authorized host:
+
+```bash
+sudo docker compose --env-file /etc/mirage/compose.env ps
+sudo docker compose --env-file /etc/mirage/compose.env logs --since 1h --tail 100
+sudo journalctl -u mirage-backup.service --since '1 day ago'
+```
+
+Inspect logs privately; they may contain addresses or client links. Production
+host settings are `/etc/mirage/host.json`, Compose settings are
+`/etc/mirage/compose.env`, and data is `/var/lib/mirage`. The test equivalents are
+`/etc/mirage-test` and `/var/lib/mirage-test`.
 
 ## Certificates
 
-For this recipe, acme.sh renews over TCP 80, installs into
-`/var/lib/marzban/certs/` and runs `/usr/local/bin/marzban restart --no-logs`.
-That restart interrupts connections. I'll compare unexpected disconnect times
-with renewal logs before assuming a transport problem.
+Existing host-level acme.sh remains the sole renewal owner. Container ACME is
+disabled. Both services mount the entire TLS parent directory read-only so atomic
+`current` symlink changes remain visible. Use a trusted system CA store in
+production (`ca_file=null`); custom test CAs are for isolated fixtures only.
 
-After renewal, I need to check the certificate actually presented on **both**
-443 and 8443, including its hostname and expiry. I'll also refresh a subscription
-and test traffic. New files on disk are insufficient evidence of a successful
-reload. I'll test the renewal/reload procedure in a maintenance window before
-depending on it; I have not done that for this setup yet.
+After successful rehearsal, replace the existing ACME reload command with:
 
-The scheduled installation/reload behavior comes from
-[acme.sh](https://github.com/acmesh-official/acme.sh).
+```bash
+/usr/bin/python3 /opt/mirage/infra/tls.py --config /etc/mirage/host.json \
+  --certificate /PRIVATE_ACME_OUTPUT/fullchain.pem --key /PRIVATE_ACME_OUTPUT/key.pem
+```
 
-## Backups
+Preserve the old hook for rollback. Check every certificate consumer before
+changing existing output locations. The helper validates hostname, trust, expiry
+and key match; publishes a versioned pair; and forces Caddy reload. Failed reload
+restores the old pair and attempts recovery reload. Telegram failure notification
+is attempted when configured. No VPN restart is requested. `--publish-only`
+bootstraps a pair without Docker or Telegram access.
 
-My recovery copy needs to leave the VPS and be encrypted, with the decryption
-key in a separate place. The [recovery notes](recovery.md) describe its contents
-and a manual offline copy. I'll take one before updates and after important
-configuration or user changes, and choose a recurring backup schedule once the
-new setup has been tested. Until that exists, I cannot assume new users are
-covered by a scheduled backup.
+Test Trojan's file reload against the candidate core. The previously reviewed
+Xray implementation polls hourly by default: allow 65 minutes for rehearsal,
+compare served leaf fingerprints on both TLS listeners and maintain an active
+transfer. Files on disk alone are insufficient. A failed continuity/reload test
+blocks cutover; automatic restarts are not a fallback.
 
-Marzban also has an optional
-[native backup service](https://gozargah.github.io/marzban/en/docs/marzban-script).
-If I enable it, I'll use `sudo marzban backup-service` to configure delivery and
-`sudo marzban backup` for a manual run. Both can send data to the configured
-channel. I'll verify what the delivered archive includes; it may omit my ACME
-state. Delivery alone does not establish that I can restore it.
+## Encrypted backups
 
-## Updates
+`infra/backup.py` takes a consistent SQLite backup, checks integrity and encrypts
+with age before delivery. Plaintext native bot backups remain disabled. The task
+checks running image identities/data mounts and records the actual core version.
+TLS publication is locked during its snapshot; ACME changes during archiving
+invalidate the snapshot for retry.
 
-I'll update deliberately rather than follow a moving image automatically:
+Configure a valid age public recipient in the private host JSON. Verify initial
+image/recovery delivery and downloaded restoration before enabling the timer:
 
-1. Save a fresh recovery copy and record the current image tag/digest and Xray
-   version. Keep the previous image available.
-2. Read the [upstream release notes](https://github.com/Gozargah/Marzban/releases)
-   and try the candidate with a restored copy in isolation, without production
-   bot polling, renewal jobs or DNS changes.
-3. On the intended host, change only the Marzban image in the official
-   `/opt/marzban/docker-compose.yml` to the chosen release. Then run:
+```bash
+sudo python3 /opt/mirage/infra/backup.py --config /etc/mirage/host.json --include-images
+sudo install -m 644 infra/mirage-backup.service infra/mirage-backup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now mirage-backup.timer
+sudo systemctl list-timers mirage-backup.timer
+```
 
-   ```bash
-   sudo docker compose -f /opt/marzban/docker-compose.yml -p marzban pull marzban
-   sudo marzban restart --no-logs
-   ```
+Schedule: **03:00 Europe/Saratov**, persistent missed-run handling, 15-minute
+failure retries. A completed daily run is not duplicated. `--include-images`
+forces a pre-change bundle even on the same day. `--prepare-only` encrypts and
+queues without contacting Telegram; it does not establish delivery.
 
-4. Check login, existing subscription links, client traffic and certificates.
-   Record the actual versions and result in my private notes.
+Parts are at most 18 MiB with SHA256 hashes. A final manifest confirms complete
+delivery. Retries skip acknowledged parts; acknowledgement-boundary failures may
+produce identifiable duplicates. Pending delivery runs before new snapshots.
+Image bundles are sent initially and when image IDs change; each recovery manifest
+references its matching image bundle. Retain all referenced bundles in Telegram
+and an independent downloaded initial set.
 
-If I need to roll back, I'll restore the previous image and matching configuration.
-If the new release changed the database, I'll also restore the pre-update data;
-reverting only the image cannot undo a database migration. I won't independently
-replace the bundled Xray unless a specific compatibility problem requires it.
+Only delivered daily recovery copies older than seven days are pruned locally.
+Queued parts and image bundles are not automatically removed. A power loss may
+leave private `.snapshot-*`, `.images-*` or `.queue-*` directories; remove only
+confirmed abandoned task directories. A full disk fails the task and triggers
+retry. Retire obsolete image sets only after checking retained snapshots.
+
+## Updates and failures
+
+Save matching images/data, test a candidate digest and bundled core in isolation,
+then explicitly pull and recreate services in an agreed window. Never update the
+core inside the container or enable unattended image updates. Repeat subscription,
+traffic, TLS and recovery checks after changes.
+
+| Symptom | Checks |
+| --- | --- |
+| Everyone disconnects | Restarts, OOM, disk, reboot and renewal timestamps |
+| Subscriptions fail, cached profiles connect | Caddy, certificate and subscription listener |
+| One client fails | Version, imported fields, routing and TUN/proxy mode |
+| One network fails | Same device/profile on another network; correlated logs |
+
+TCP connection, profile import and ping are not sufficient traffic evidence.
+Several transports on one IP do not provide an independent IP fallback.

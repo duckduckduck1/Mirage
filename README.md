@@ -1,37 +1,57 @@
 # Mirage
 
-My notes for running a VPN for myself and a few friends with
-[Marzban](https://github.com/Gozargah/Marzban).
+Docker Compose configuration and operational documentation for a personal VPN
+based on [3x-ui](https://github.com/MHSanaei/3x-ui), Xray and SQLite.
 
-## My notes
+## Status
 
-1. [Installation](docs/setup.md): a fresh Ubuntu VPS, official Marzban, one Trojan
-   TCP/TLS inbound, a domain and HTTPS subscriptions.
-2. [Maintenance](docs/operations.md): give someone access, check failures, renew
-   certificates, back up and update.
-3. [Recovery](docs/recovery.md): restore the server without recreating users or
-   replacing their subscription links.
+**Prepared for migration; not deployed or operationally accepted.** The existing
+VPS still runs Marzban. This change does not access the VPS, test live
+subscriptions or send Telegram messages. See the [candidate review](audit/3x-ui-candidate.md)
+for the scope of local verification.
 
-**Status: proposed setup, not yet tested end to end.** Commands and settings were
-checked against upstream sources on 2026-10-23. Installation, certificate renewal,
-client traffic and restoration still need a separate test on an isolated VPS.
-There is no claim that this transport works through every Russian ISP or campus
-network.
+## Architecture
 
-My existing server still runs the previous configuration. I need to prepare its
-migration separately rather than run a fresh installation over it. Its dependencies
-and migration requirements are in [existing-server notes](docs/migration.md).
+- Official 3x-ui and Caddy images, pinned by digest; no application fork or build.
+- Four transports: VLESS TCP REALITY, gRPC REALITY, XHTTP REALITY and Trojan TLS.
+- Caddy terminates HTTPS for subscriptions. Administration uses an SSH tunnel.
+- The native Telegram bot provides administrative commands and alerts.
+- GitHub Environment Secrets supply runtime tokens through a manual workflow.
+- Host tasks provide validated certificate publication and encrypted recovery
+  delivery. Persistent data and credentials remain outside the repository.
 
-I don't need to clone this repository onto the VPS: Marzban provides its own
-installer and Docker Compose deployment. My actual settings, credentials and
-encrypted backups belong outside this public repository.
+## Documentation
 
-## Reference
+| Guide | Contents |
+| --- | --- |
+| [Setup](docs/setup.md) | Dependencies, isolated test, panel settings and inbounds |
+| [Operations](docs/operations.md) | Telegram, secrets, certificates, backups and updates |
+| [Recovery](docs/recovery.md) | Restore matching images, database and configuration |
+| [Migration](docs/migration.md) | Existing deployment, acceptance, cutover and rollback |
 
-[Previous deployment source](https://github.com/duckduckduck1/Mirage/tree/legacy-ansible-2026-10-23)
-· [Historical observations](audit/acceptance-ledger.md)
-· [Changelog](CHANGELOG.md) · [MIT license](LICENSE)
+After provisioning, configuration and acceptance, start the services with:
 
-For edits, I can run `python3 scripts/check.py` with Python 3.10+ and Git.
-It checks local Markdown links and common accidental secret additions, not the
-server or VPN connectivity.
+```bash
+docker compose --env-file /etc/mirage/compose.env up -d
+```
+
+Images must be pulled explicitly first. This command does not install host
+packages, obtain certificates, create users or migrate Marzban. The
+[example environment](.env.example) uses **loopback and alternate test ports**.
+
+## Development checks
+
+```bash
+python3 scripts/check.py
+python3 -m unittest discover -s tests -v
+docker compose --env-file .env.example config --quiet
+git diff --check
+```
+
+The checker needs Python 3.10+ and Git. Host tasks additionally require Docker
+Compose, OpenSSL and age. Encryption tests require `age` and `age-keygen`; missing
+tools produce explicit skips. Local checks do not establish VPN availability.
+
+[Changelog](CHANGELOG.md) · [License](LICENSE) ·
+[Historical acceptance](audit/acceptance-ledger.md) ·
+[Archived deployment](https://github.com/duckduckduck1/Mirage/tree/legacy-ansible-2026-10-23)

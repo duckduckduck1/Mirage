@@ -2,6 +2,7 @@
 """Check tracked documentation and common secret patterns without network access."""
 
 import ipaddress
+import json
 import re
 import subprocess
 import sys
@@ -13,7 +14,7 @@ SENSITIVE_DIRS = {"secrets", "credentials", "backups", "exports"}
 SENSITIVE_NAMES = {"access", "bot_telegram_key", "duckdns_token"}
 SENSITIVE_SUFFIXES = {
     ".key", ".pem", ".crt", ".p12", ".vault", ".db", ".sqlite", ".sqlite3",
-    ".backup", ".dump", ".tar", ".gz", ".tgz", ".zip", ".qcow2",
+    ".backup", ".dump", ".tar", ".gz", ".tgz", ".zip", ".qcow2", ".age", ".gpg", ".part",
 }
 CONTENT_RULES = {
     "private key marker": re.compile(r"-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----"),
@@ -73,12 +74,31 @@ def inspect_file(root: Path, relative: Path, tracked: set[str]) -> list[str]:
         report("tracked file cannot be read")
         return problems
 
+    if relative.suffix.lower() == ".json":
+        def inspect_json(value):
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    if (re.search(r"TOKEN|PASSWORD|PRIVATE_KEY|SECRET", key, re.IGNORECASE)
+                            and isinstance(item, (str, int, float)) and not placeholder(str(item))):
+                        report("credential-like assignment")
+                    inspect_json(item)
+            elif isinstance(value, list):
+                for item in value:
+                    inspect_json(item)
+        try:
+            inspect_json(json.loads(source))
+        except json.JSONDecodeError:
+            report("invalid JSON")
+
     fence = None
     for number, line in enumerate(source.splitlines(), 1):
         for reason, pattern in CONTENT_RULES.items():
             if pattern.search(line):
                 report(reason, number)
-        assignment = ASSIGNMENT.match(line)
+        # Credential assignments apply to configuration, not Python variable names.
+        # Literal token/key/proxy patterns above still scan every text file.
+        is_config = relative.suffix.lower() in {".yaml", ".yml", ".toml"} or name.startswith(".env")
+        assignment = ASSIGNMENT.match(line) if is_config else None
         if assignment and not placeholder(assignment[2]):
             report("credential-like assignment", number)
         for match in IPV4.finditer(line):
