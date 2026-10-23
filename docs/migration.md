@@ -2,7 +2,7 @@
 
 [README](../README.md) · [Setup](setup.md) · [Operations](operations.md) · [Recovery](recovery.md)
 
-**Status: repository preparation only. No 3x-ui server migration performed.**
+**Status: test files and image staged; no 3x-ui service started or migration performed.**
 Historical checks below apply to Marzban. They are not acceptance of the new setup.
 
 ## Existing deployment
@@ -89,7 +89,7 @@ to current clients or the proposed installation.
 
 Target: official prebuilt 3x-ui, SQLite and Caddy under Compose. No application
 fork, submodule or custom build. [Candidate review](../audit/3x-ui-candidate.md)
-records local artifact checks only.
+separates local artifact checks from subsequent VPS preparation.
 
 ### Preparation and isolated test
 
@@ -99,10 +99,14 @@ repaired Marzban, A-13 image, Xray v26.7.28, SQLite/signing state, configuration
 TLS/ACME, Caddy and four external maintenance scripts. The older archive is not a
 fresh recovery copy of the repaired core.
 
-Keep existing services running while the candidate uses separate data/network,
-alternate ports and a new bot. Require 512 MiB available memory; stop on pressure,
-OOM or degradation. Do not change production DNS, ACME hooks or the active GUI VPN
-for testing. Several transports on one IP do not provide independent IP redundancy.
+Keep existing services running during preparation. Concurrent testing requires
+512 MiB available memory. The current VPS does not meet that gate; the owner
+authorized a sequential test after preparation, with Marzban stopped and its
+data preserved. Follow the [memory and interruption procedure](setup.md#test-isolation),
+remeasure memory after stopping and restore Marzban if the gate still fails.
+Keep separate data/network, alternate ports and a new bot. Stop on pressure or
+OOM. Do not change production DNS, ACME hooks or the active GUI VPN for testing.
+Several transports on one IP do not provide independent IP redundancy.
 
 Transfer all users through native tools. Preserve UUID/password, state, expiry,
 remaining quota and four assignments; do not import Marzban tables or its entire
