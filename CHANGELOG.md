@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-24 — Existing-server Xray repair
+
+- Recorded the approved upgrade of the existing pinned core to Xray v26.7.28,
+  explicit REALITY client compatibility and public-key settings, with rollback
+  copies retained privately. The Marzban A-13 image and subscriptions were kept.
+- Recorded successful before/after subscription comparisons, all users' server
+  traffic checks and external tests including an XHTTP 1 MiB download.
+- Kept GUI/TUN, affected-network and fresh-install acceptance explicitly separate
+  from these results. Replacing the panel remains a separate decision.
+
 ## 2026-10-23 — Existing-server checks and private recovery files
 
 - Clarified that the Trojan installation example was chosen for a smaller draft

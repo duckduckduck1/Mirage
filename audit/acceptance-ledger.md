@@ -101,6 +101,38 @@ Its source is preserved at the
 - This was maintenance of the existing deployment. The proposed new-install
   recipe has not gained installation, renewal or restoration acceptance.
 
+## Existing-server core repair — 2026-10-24
+
+- Compared all 284 tracked Python backend files with official Marzban v0.8.4 Git
+  blobs: 283 matched; only `app/subscription/share.py` differed by the known A-13
+  short-ID repair. This was a backend source comparison, not a full image audit.
+- Reproduced modern Xray REALITY failures against the old pinned core both
+  directly from the laptop and through SSH. Tested a separate localhost candidate
+  with the installed Marzban API client: 20 user additions, four removals and
+  system statistics succeeded without changing production users or the database.
+- With explicit approval, upgraded the working pinned Xray from v24.12.31 to
+  v26.7.28, added existing `publicKey` values and set REALITY `minClientVer` to
+  `1.8.0`. A fresh SQLite snapshot passed integrity checks. The previous core and
+  configuration were saved privately; the prepared core had already been checked
+  against its official archive checksum. Marzban restarted; Caddy did not.
+- All sixteen subscription requests passed before and after: four active users
+  in generic, Hiddify, Karing and Xray JSON formats. Counts were respectively
+  four, three, three and four per user, with identical connection parameters.
+  User identity, credentials, signing state and recorded assignments were
+  unchanged. The exact old URL in Throne returned an identical response body.
+- All sixteen user/transport combinations passed HTTPS traffic on server
+  loopback. From the laptop's physical Wi-Fi interface, both Xray v24.12.31 and
+  v26.7.28 passed all four transports; official sing-box v1.13.16 passed its three
+  supported profiles. XHTTP also passed a 1 MiB download and three repeated HTTPS
+  requests: fifteen successful external checks in total.
+- Confirmed a running new-core process in the working container. Both public TLS
+  listeners retained trusted certificates matching the installed file, expiring
+  on 2026-12-25. No startup traceback was observed. No rollback was needed.
+- These checks did not operate the Throne GUI, establish sustained TUN stability,
+  test affected Beeline/university/allowlist networks, or accept the proposed fresh
+  installation. Marzban's modern-key automatic parser remains unfixed; explicit
+  public keys avoid that code path for the existing configuration.
+
 ## Evidence policy
 
 Every future entry records the date, tested component versions, non-sensitive

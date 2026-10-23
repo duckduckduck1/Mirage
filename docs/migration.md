@@ -10,13 +10,13 @@ uses the earlier setup, so I need these notes until I migrate it. Its source is 
 which points to commit `bf3c47e90f7b1be7898f8be14f6658ced7d0db32` and includes
 the Caddy forced-reload repair.
 
-The last observed deployment on 2026-10-23 had:
+After maintenance on 2026-10-24, my existing deployment has:
 
 | Component | Observed configuration |
 | --- | --- |
 | OS | Ubuntu 22.04 |
 | Marzban | v0.8.4 with the temporary A-13 image patch, SQLite |
-| Xray | v24.12.31 through `XRAY_EXECUTABLE_PATH` |
+| Xray | v26.7.28 through `XRAY_EXECUTABLE_PATH` |
 | Transports | TCP REALITY 443, gRPC REALITY 8443, XHTTP REALITY 2053, Trojan TLS 9443 |
 | Panel and subscriptions | Caddy HTTPS on 2096, proxying to Marzban's Unix socket |
 | Certificates and DNS | External ACME/DNS-01 certificate and a DuckDNS updater |
@@ -52,7 +52,7 @@ Beeline or the university Wi-Fi. I still need matching client/network observatio
 to explain failures on those paths.
 
 The certificates served on Trojan and the public subscription listener matched
-the installed file and expired on 2026-12-25. The running Xray was still
+the installed file, with expiry on 2026-12-25. The running Xray was still
 v24.12.31. These checks did not establish a reason to reinstall Marzban or discard
 the working REALITY profiles.
 
@@ -74,6 +74,56 @@ My next transport decision needs tests from an affected client network. The
 single-Trojan fresh-install example is not a plan to remove my working VLESS
 profiles. I will stop before any maintenance that requires restarting a working
 VPN service and discuss the interruption first.
+
+## What I changed and checked on 2026-10-24
+
+I reproduced a REALITY compatibility failure: the existing server passed all four
+profiles with Xray v24.12.31, while a separate v26.7.28 client passed only Trojan.
+The same failure occurred through an SSH tunnel, so reproducing this particular
+failure did not require ISP filtering or TUN mode. This does not explain every
+reported client or network interruption.
+
+I tested Xray v26.7.28 on localhost before applying it. Its
+[default minimum REALITY client version](https://github.com/XTLS/Xray-core/blob/v26.7.28/infra/conf/transport_security.go#L118)
+rejects older Xray and sing-box clients. I explicitly set `minClientVer` to
+`1.8.0` to retain those clients. I also added each existing REALITY public key
+explicitly. Marzban v0.8.4 cannot parse modern `x25519` command output; providing
+`publicKey` lets its configuration loader resolve these existing inbounds. The
+upstream parsing problem is recorded in
+[issue #1938](https://github.com/Gozargah/Marzban/issues/1938). Automatic key
+generation through the old panel remains a limitation; I did not patch its code.
+
+After a fresh consistent SQLite snapshot, I replaced only the pinned core and
+prepared configuration, then restarted Marzban with explicit approval. The A-13
+image stayed in place. Ports, users, credentials, signing state and connection
+parameters stayed the same. Caddy did not restart. The old core and configuration
+were retained privately for rollback; the earlier encrypted recovery bundle
+restores the pre-update core and configuration.
+
+My checks after the working restart passed:
+
+- Sixteen subscription responses: four users in generic, Hiddify, Karing and
+  explicit Xray JSON formats. Connection parameters matched the responses saved
+  before the change. Generic and Xray output had four profiles; Hiddify/Karing
+  still had three because their installed generator excludes XHTTP.
+- The exact existing subscription URL saved in Throne returned HTTP 200 and an
+  identical response body before and after the restart.
+- All sixteen user/transport combinations passed an HTTPS request through the
+  working server using temporary clients on VPS loopback.
+- Separate Xray v24.12.31 and v26.7.28 clients passed all four profiles from the
+  laptop through its physical Wi-Fi interface. Official sing-box v1.13.16 passed
+  TCP REALITY, gRPC REALITY and Trojan on the same path.
+- XHTTP with the modern Xray client downloaded exactly 1 MiB and passed three
+  additional HTTPS requests. These fifteen laptop checks used the live public
+  server; the active GUI VPN configuration was left alone.
+- The running container used the new core. Trojan and subscription TLS remained
+  trusted, matched the installed certificate and expire on 2026-12-25. No startup
+  traceback was observed.
+
+These are successful traffic checks, not sustained Throne TUN acceptance or a
+test of Beeline, university Wi-Fi or mobile allowlists. The new-install recipe in
+the main guide also remains untested. I will assess a replacement for the old
+panel separately from this repair.
 
 ## REALITY subscription limitation
 
