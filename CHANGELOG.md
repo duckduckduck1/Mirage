@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-23 — Personal runbook
+
+- Refocused README on installation, maintenance and recovery. Kept existing-server
+  notes and historical evidence as secondary references.
+- Chose one proposed fresh-install recipe: Ubuntu 24.04, official Marzban v0.8.4,
+  Trojan TCP/TLS, native HTTPS subscriptions and acme.sh renewal.
+- Removed contribution rules, the PR checklist and the unused Docker ignore file;
+  ordinary documentation edits no longer require an acceptance-ledger entry.
+- Wrote the guides as personal notes. Source review does not establish successful
+  installation, renewal, restoration or client traffic; those tests remain pending.
+- No server changes were made for this documentation update.
+
 ## 2026-10-23 — Documentation-first repository
 
 - Replaced the Ansible deployment project and bilingual VitePress site with four

@@ -1,91 +1,118 @@
-# Operations
+# Looking after my VPN
 
-[Back to README](../README.md)
+[README](../README.md) · [Installation](setup.md) · [Recovery](recovery.md)
 
-These notes use the
-[official Marzban command](https://gozargah.github.io/marzban/en/docs/marzban-script).
-Check `sudo marzban help` for the installed script's interface. Run server
-commands only as a deliberate operating action; repository checks never run them.
+These are my intended maintenance steps for the new setup. I still need to test
+them on an isolated VPS. My [current server](migration.md) uses a different
+configuration, so I cannot apply the fresh-install settings or replace its image
+without preparing that migration first.
 
-## Users and service state
+## Giving someone access
 
-Use the dashboard, optional upstream Telegram bot or official CLI to create,
-disable and remove users, assign inbounds, and set limits and expiry dates.
-Give each person their own subscription. A subscription URL grants access and
-must be treated as a credential.
+I'll create one Marzban user per person, enable Trojan and assign the
+`TROJAN TCP TLS` inbound. I'll set the quota and expiry deliberately, then send
+the subscription link privately. If a link leaks, I'll revoke or replace that
+person's access through Marzban and check that the old credentials stop working.
 
-Useful commands on the intended host:
+For the proposed setup, the subscription uses HTTPS on 8443 and contains one
+Trojan profile on 443. I need to check both subscription refresh and actual client
+traffic before sharing it. Adding profiles does not establish automatic failover.
+
+## Where my configuration lives
+
+| Location | What I need it for |
+| --- | --- |
+| `/opt/marzban/docker-compose.yml` | Official deployment and selected image |
+| `/opt/marzban/.env` | Marzban settings |
+| `/var/lib/marzban/db.sqlite3` | Complete user and subscription state |
+| `/var/lib/marzban/xray_config.json` | Inbound and routing settings |
+| `/var/lib/marzban/certs/` | Certificate and private key used by both listeners |
+| `/root/.acme.sh/` and root's crontab | ACME account, renewal settings and schedule |
+
+These are the paths selected in my [installation notes](setup.md), not a reason
+to assume an older installation uses them. I'll keep real settings, links and
+recovery material outside Git, with restricted access.
+
+## When something stops working
+
+On the intended VPS, my first checks are:
 
 ```bash
 sudo marzban status
 sudo marzban logs
+sudo journalctl -u docker --since '1 hour ago'
+df -h
+free -h
 ```
 
-Logs can contain credentials or subscription request paths. Inspect locally and
-redact them before sharing. An application being up does not demonstrate usable
-VPN traffic from a client network.
+I'll note the time, affected users, network and client version before changing
+settings. Logs may include private links, so I'll redact them before sharing.
 
-`sudo marzban restart` applies changed application settings and interrupts the
-service. `sudo marzban edit-env` opens configuration; it is not a status command.
-Preserve working access while making changes on a shared VPS.
+| What I observe | What I'll check next |
+| --- | --- |
+| Everyone disconnects together | Container/core restart, renewal time, host reboot, memory and disk |
+| Subscription fails but an imported profile connects | Certificate and HTTPS listener on 8443 |
+| Subscription refreshes but traffic fails | User quota/expiry, inbound state, port 443 and imported address/SNI |
+| Only one client fails | Imported settings, client/core version, VPN/TUN mode and routing |
+| Only one Wi-Fi network fails | Same device/profile on mobile data, then client/server logs from the same attempt |
+
+A successful TCP connection is not proof that TLS or the VPN tunnel works. Before
+blaming filtering, I need evidence of which side received and answered the
+request. A DNS change does not change the destination of an IP-based profile.
+
+## Certificates
+
+For this recipe, acme.sh renews over TCP 80, installs into
+`/var/lib/marzban/certs/` and runs `/usr/local/bin/marzban restart --no-logs`.
+That restart interrupts connections. I'll compare unexpected disconnect times
+with renewal logs before assuming a transport problem.
+
+After renewal, I need to check the certificate actually presented on **both**
+443 and 8443, including its hostname and expiry. I'll also refresh a subscription
+and test traffic. New files on disk are insufficient evidence of a successful
+reload. I'll test the renewal/reload procedure in a maintenance window before
+depending on it; I have not done that for this setup yet.
+
+The scheduled installation/reload behavior comes from
+[acme.sh](https://github.com/acmesh-official/acme.sh).
 
 ## Backups
 
-Use the upstream backup interface, configured interactively on the host:
+My recovery copy needs to leave the VPS and be encrypted, with the decryption
+key in a separate place. The [recovery notes](recovery.md) describe its contents
+and a manual offline copy. I'll take one before updates and after important
+configuration or user changes, and choose a recurring backup schedule once the
+new setup has been tested. Until that exists, I cannot assume new users are
+covered by a scheduled backup.
 
-```bash
-sudo marzban backup-service
-sudo marzban backup
-```
+Marzban also has an optional
+[native backup service](https://gozargah.github.io/marzban/en/docs/marzban-script).
+If I enable it, I'll use `sudo marzban backup-service` to configure delivery and
+`sudo marzban backup` for a manual run. Both can send data to the configured
+channel. I'll verify what the delivered archive includes; it may omit my ACME
+state. Delivery alone does not establish that I can restore it.
 
-The first command configures delivery and scheduling; the second requests a
-manual backup. Either can send data through the configured delivery channel.
-Do not execute them from CI or a test clone with production bot credentials.
+## Updates
 
-Confirm delivery, archive readability and a restoration test. A scheduled cron
-entry alone does not establish that any usable backup exists. Keep a protected,
-encrypted recovery copy outside the VPS, with the decryption key stored
-separately; delivery through Telegram does not replace this copy.
+I'll update deliberately rather than follow a moving image automatically:
 
-Include configuration and external dependencies as described in
-[Recovery](recovery.md). Verify SQLite consistency for the installed producer;
-copying an actively written database file is not a guaranteed consistent backup.
-When consistency cannot be established, take an offline copy during a planned
-service stop. Do not add a second custom backup service around Marzban.
+1. Save a fresh recovery copy and record the current image tag/digest and Xray
+   version. Keep the previous image available.
+2. Read the [upstream release notes](https://github.com/Gozargah/Marzban/releases)
+   and try the candidate with a restored copy in isolation, without production
+   bot polling, renewal jobs or DNS changes.
+3. On the intended host, change only the Marzban image in the official
+   `/opt/marzban/docker-compose.yml` to the chosen release. Then run:
 
-## Updates and rollback
+   ```bash
+   sudo docker compose -f /opt/marzban/docker-compose.yml -p marzban pull marzban
+   sudo marzban restart --no-logs
+   ```
 
-1. Record the current image tag and digest, installed management-script version,
-   Xray version and local overrides. Keep the exact rollback image accessible.
-2. Obtain a fresh external backup and review upstream release notes. Rehearse on
-   an isolated copy with delivery, DNS changes and production bot polling disabled.
-3. Use the upstream update procedure only after choosing the intended release and
-   maintenance window. The documented `sudo marzban update` follows the upstream
-   updater; it is not a promise to preserve a locally patched image or core.
-4. Recheck subscriptions, profile parameters, actual client traffic and the served
-   certificate. Record the resulting versions and observed results.
-5. If the update fails, return to the recorded image and configuration. If a
-   database migration occurred, restore the matching pre-update data as well.
+4. Check login, existing subscription links, client traffic and certificates.
+   Record the actual versions and result in my private notes.
 
-Do not apply this updater blindly to the existing A-13 deployment. Its transition
-is a separate [migration](migration.md). Do not treat an image rollback as a
-database downgrade, or run old and new application instances against one database.
-
-Avoid unattended application or core upgrades. `sudo marzban core-update` is an
-upstream option for intentionally selecting another Xray build; it is not a
-required extra step for a fresh install. Test server/client compatibility before
-using a different core.
-
-## Routine checks
-
-- Check the public HTTPS endpoint and the expiry of the certificate it actually
-  presents. Check again after renewal.
-- Verify backup delivery and repeat an isolated restoration drill when the backup
-  format, producer or procedure changes.
-- Keep enough disk space for data and logs, and inspect unexpected restarts.
-- Restrict configuration, SQLite data and recovery material to the required
-  accounts; inspect directory traversal permissions as well as file modes.
-- For network-specific failures, follow [Troubleshooting](migration.md#troubleshooting).
-
-The [ledger](../audit/acceptance-ledger.md) contains historical evidence. Its old
-results do not establish acceptance for newly installed versions or networks.
+If I need to roll back, I'll restore the previous image and matching configuration.
+If the new release changed the database, I'll also restore the pre-update data;
+reverting only the image cannot undo a database migration. I won't independently
+replace the bundled Xray unless a specific compatibility problem requires it.

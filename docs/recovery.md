@@ -1,75 +1,91 @@
-# Recovery
+# Recovering my server
 
-[Back to README](../README.md)
+[README](../README.md) · [Installation](setup.md) · [Maintenance](operations.md)
 
-This is a recovery checklist for a new upstream installation. It has not received
-a separate restoration acceptance test. Recovering the existing deployment also
-requires the legacy dependencies in [Migration](migration.md).
+I want to be able to lose the VPS and restore access without asking everyone to
+import new subscriptions. This is my proposed procedure for the new setup; I
+have not tested a restoration of it yet. My [existing server](migration.md)
+also needs its patched image and other legacy dependencies.
 
-## Recovery material
+## What I'll keep outside the VPS
 
-Preserve the complete SQLite state and the matching application configuration.
-The quick installer normally uses `/opt/marzban` and `/var/lib/marzban`; verify
-the actual database path in `.env` before taking or restoring a backup.
+- `/opt/marzban/`: deployment file and `.env`.
+- `/var/lib/marzban/`: complete SQLite state, Xray configuration and installed
+  certificates/keys.
+- `/root/.acme.sh/` and the relevant root crontab entry: account, renewal and
+  install/reload settings. This contains private keys too.
+- A private note with the hostname, DNS access, selected image tag/digest, bundled
+  Xray version and client versions I actually tested. I'll retain the image itself
+  if I cannot rely on downloading it later.
 
-Include the deployment file, `.env`, Xray configuration, certificate/key files and
-any non-default core or assets required by that deployment. Preserve external
-DNS/ACME configuration, relevant credentials and renewal hooks separately when
-the application archive does not contain them. Record exact image versions and
-make any locally built rollback image recoverable outside the failed host.
+I'll encrypt this bundle outside the VPS and keep its decryption key separately.
+Nothing in that list belongs in this public checkout. The official
+[backup guide](https://gozargah.github.io/marzban/en/examples/backup) covers the
+application directories; my ACME state is an additional dependency of this recipe.
 
-Limit collection to Mirage-owned resources on a shared server. Store recovery
-material encrypted outside the VPS and checkout. Keep the decryption key in a
-separate protected location, and record who can recover it.
+## A simple consistent copy
 
-## Why a user list is insufficient
+For an occasional manual backup, I'll accept a short outage and stop Marzban
+before copying SQLite. I'll pause the ACME cron entry and wait for any running
+renewal to finish so it cannot restart Marzban during the copy. On the intended
+**VPS**, after checking there is enough disk space:
 
-Preserving names alone does not preserve proxy credentials, inbound assignments,
-Host Settings, limits, expiry, creation/revocation state or the signing secret used
-to validate subscriptions. For the legacy v0.8.4 deployment, that signing secret
-is stored in the database. Recreating users may invalidate old subscription URLs
-even when their names match.
+```bash
+sudo -i
+umask 077
+recovery_dir=$(mktemp -d /root/marzban-recovery.XXXXXXXX)
+crontab -l > "$recovery_dir/root-crontab.txt"
+docker compose -f /opt/marzban/docker-compose.yml -p marzban stop marzban
+tar -C / -czf "$recovery_dir/server.tar.gz" opt/marzban var/lib/marzban root/.acme.sh
+marzban restart --no-logs
+exit
+```
 
-Restore the complete matching database rather than rebuilding accounts from a
-spreadsheet or generating replacement identifiers. Retain the public URL scheme,
-domain, port, subscription path and previously issued tokens when preserving
-links. The endpoint must still serve a trusted certificate for its hostname.
+These are individual steps, not a script to run unattended. I'll proceed with
+`tar` only after the stop succeeds. If `tar` fails, I still need to restart the
+service and resolve the backup failure. I'll restore the paused ACME schedule
+after the copy and service restart. I'll record the
+generated directory path privately, transfer both files over SSH to my trusted
+workstation, encrypt them there using my chosen backup tool and check that I can
+decrypt/read the copy. Then I'll remove the temporary plaintext copies from the
+VPS and workstation. I have not chosen or tested an automated encrypted backup
+destination for this recipe yet.
 
-## Inspect the archive before restoring
+This is my own offline directory archive, not Marzban's native backup format.
+For a native archive, I'll inspect its contents first: the
+[producer script](https://github.com/Gozargah/Marzban-scripts/blob/master/marzban.sh)
+may package the database/configuration separately and exclude a custom Xray core.
+I cannot restore different formats by assuming the same archive layout.
 
-The [official recovery guide](https://gozargah.github.io/marzban/en/examples/backup)
-describes restoring the two application directories. The current
-[upstream backup script](https://github.com/Gozargah/Marzban-scripts/blob/master/marzban.sh)
-also demonstrates why the producer version matters: its archive uses separate
-configuration/database files and a `marzban_data` directory, and excludes the
-separately installed `xray-core` directory. Do not assume all historical backups
-have the same layout or include the custom core.
+## Restore in isolation first
 
-Inspect archive members privately and map them to the original locations before
-extracting. Reject unexpected paths and link targets. Verify integrity and obtain
-a consistent SQLite snapshot, including any required journal state; do not restore
-an arbitrary copy of a database while another process is writing it. A working
-backup must be tested with its actual producer format.
+1. On an isolated VPS, install the same official Marzban release. Stop it before
+   replacing its data. I'll preserve any destination state I might still need.
+2. Decrypt and inspect the archive privately. For the manual copy above, the paths
+   start with `opt/marzban`, `var/lib/marzban` and `root/.acme.sh`. I'll extract to
+   a private staging directory and check paths/link targets before placing the
+   files back at those locations. I won't extract an unchecked archive into `/`.
+3. Restore the complete database and matching configuration, ownership and
+   restrictive permissions. Keep restored cron jobs disabled, along with any bot
+   polling or delivery. The clone must not renew production certificates, update
+   live DNS or expose copied user access.
+4. Keep the clone's firewall private. Start with `sudo marzban restart --no-logs`.
+   Copying files does not reload the application.
+5. Check SQLite integrity, administrator login, users, quotas, inbound assignments,
+   existing subscription tokens and client traffic. On my test workstation, I can
+   temporarily resolve the original hostname to the clone while keeping public
+   DNS unchanged. I'll record the versions, result and recovery time privately.
 
-## Restoration drill
+For a real replacement, I'll switch DNS only after the restoration checks,
+including the certificate served on both ports. I'll review and deliberately
+reenable the required renewal schedule; I won't overwrite an unrelated root
+crontab wholesale. For a planned migration, I'll freeze user changes and take a
+final consistent copy before switching.
 
-1. Prepare an isolated host and the matching upstream release. Save any existing
-   destination state before replacement. Keep the test endpoint private.
-2. Prevent the clone from polling the production Telegram bot, delivering backups,
-   updating live DNS or issuing certificates for the production domain. Do not
-   expose copied customer access to the public network.
-3. Stop the destination Marzban service. Restore the matched configuration and
-   database to their original paths using the inspected layout. Restore required
-   external dependencies, ownership and restrictive permissions. Never extract an
-   unchecked archive directly into the filesystem root.
-4. Start the restored service. The upstream procedure requires an explicit
-   `sudo marzban restart` after restoration; copying files does not reload them.
-5. Verify database integrity, dashboard login, user states, credentials, inbound
-   assignments and existing subscription tokens. Confirm a test client's traffic
-   and the certificate presented by the intended HTTPS endpoint.
-6. Record the tested versions, archive layout, observed results and recovery time.
-   Keep production DNS and external automation unchanged throughout the drill.
+## Why a list of users isn't enough
 
-Only a successful isolated drill establishes that the bundle is sufficient for
-recovery. Switching a live endpoint is a separate maintenance action, with a
-fresh final backup and a defined rollback point.
+I need the complete database, including proxy credentials, user state, assignments,
+Host Settings and the subscription signing secret. Recreating matching usernames
+does not preserve all of that and can invalidate old links. The public hostname,
+port, subscription path and signing state also need to survive. I'll verify an
+already issued subscription, not just create a new user and call the restore done.

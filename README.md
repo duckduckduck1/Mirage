@@ -1,56 +1,37 @@
 # Mirage
 
-Personal operating notes for a small VPN based on upstream
+My notes for running a VPN for myself and a few friends with
 [Marzban](https://github.com/Gozargah/Marzban).
 
-Marzban supplies the application, its Docker deployment, user management,
-subscriptions, Telegram bot and maintenance commands. This repository documents
-their use; it does not provide an installer, a separate application or a custom
-Compose stack.
+## My notes
 
-## Start here
+1. [Installation](docs/setup.md): a fresh Ubuntu VPS, official Marzban, one Trojan
+   TCP/TLS inbound, a domain and HTTPS subscriptions.
+2. [Maintenance](docs/operations.md): give someone access, check failures, renew
+   certificates, back up and update.
+3. [Recovery](docs/recovery.md): restore the server without recreating users or
+   replacing their subscription links.
 
-| Guide | Use it for |
-| --- | --- |
-| [Setup](docs/setup.md) | A new, isolated installation using the official installer |
-| [Operations](docs/operations.md) | Users, service status, backups and controlled updates |
-| [Recovery](docs/recovery.md) | Restoring data, configuration and subscription identity |
-| [Migration and troubleshooting](docs/migration.md) | Understanding the existing deployment and planning its later migration |
+**Status: proposed setup, not yet tested end to end.** Commands and settings were
+checked against upstream sources on 2026-10-23. Installation, certificate renewal,
+client traffic and restoration still need a separate test on an isolated VPS.
+There is no claim that this transport works through every Russian ISP or campus
+network.
 
-**Status:** the new upstream-only setup is documented, but has not passed a
-separate installation, recovery or client-traffic acceptance test. Repository
-checks validate documentation and guard against accidental secret additions;
-they do not prove that a VPN works on a particular network.
+My existing server still runs the previous configuration. I need to prepare its
+migration separately rather than run a fresh installation over it. Its dependencies
+and migration requirements are in [existing-server notes](docs/migration.md).
 
-## Existing deployment
+I don't need to clone this repository onto the VPS: Marzban provides its own
+installer and Docker Compose deployment. My actual settings, credentials and
+encrypted backups belong outside this public repository.
 
-The running deployment still uses the previous Marzban/Xray configuration and
-its temporary A-13 image patch. This repository cleanup does not migrate it or
-change existing users, endpoints or subscription URLs. Do not apply the new
-setup instructions over that deployment.
+## Reference
 
-The complete previous project, including Ansible, A-13, DNS automation and the
-corrected Caddy certificate reload hook, is preserved at
-[`legacy-ansible-2026-10-23`](https://github.com/duckduckduck1/Mirage/tree/legacy-ansible-2026-10-23).
-Its recorded acceptance results remain in the
-[acceptance ledger](audit/acceptance-ledger.md).
+[Previous deployment source](https://github.com/duckduckduck1/Mirage/tree/legacy-ansible-2026-10-23)
+· [Historical observations](audit/acceptance-ledger.md)
+· [Changelog](CHANGELOG.md) · [MIT license](LICENSE)
 
-Documentation is maintained here in English. The former GitHub Pages site is
-retired.
-
-## Repository checks
-
-Run with Python 3.10 or newer and Git:
-
-```bash
-python3 scripts/check.py
-```
-
-Checks cover Git-tracked files, including staged additions. They check relative
-Markdown file links and common sensitive filenames and secret patterns. Keep
-credentials, actual server configuration, client links and backups outside the
-checkout. The heuristic guard is not a substitute for reviewing the staged diff.
-
-See [Contributing](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
-Mirage's own material is licensed under [MIT](LICENSE); upstream projects retain
-their own licenses.
+For edits, I can run `python3 scripts/check.py` with Python 3.10+ and Git.
+It checks local Markdown links and common accidental secret additions, not the
+server or VPN connectivity.
