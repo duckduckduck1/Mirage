@@ -8,6 +8,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import sqlite3
 import sys
@@ -148,7 +149,14 @@ def build_recovery(config, environment, images, core, image_bundle, work):
         # Preserve only this ACME job, never unrelated root crontab entries.
         cron = run(["crontab", "-l"]).decode()
         acme_command = str(Path(config["acme_dir"]) / "acme.sh")
-        lines = [line for line in cron.splitlines() if acme_command in line and "--cron" in line]
+        lines = []
+        for line in cron.splitlines():
+            try:
+                words = shlex.split(line, comments=True)
+            except ValueError:
+                continue
+            if acme_command in words and "--cron" in words:
+                lines.append(line)
         if not lines:
             raise SafeError("The expected host ACME schedule was not found.")
         payload = ("\n".join(lines) + "\n").encode()

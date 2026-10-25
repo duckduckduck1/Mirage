@@ -205,7 +205,8 @@ class SnapshotTests(PrivateFixture):
         (acme / "account.conf").write_text("fixture ACME account")
         work = self.root / "work"
         work.mkdir(mode=0o700)
-        cron = ("0 0 * * * /unrelated/private-job\n0 1 * * * " + str(acme / "acme.sh") + " --cron\n").encode()
+        cron = ('0 0 * * * /unrelated/private-job\n0 1 * * * "' + str(acme)
+                + '"/acme.sh --cron --home "' + str(acme) + '"\n').encode()
         with mock.patch.object(backup, "run", return_value=cron):
             path = backup.build_recovery(self.config, host.read_env(self.config), [], "Xray fixture", "image-fixture", work)
         with tarfile.open(path, "r:gz") as archive:
