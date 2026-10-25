@@ -5,11 +5,11 @@ based on [3x-ui](https://github.com/MHSanaei/3x-ui), Xray and SQLite.
 
 ## Status
 
-**Staged on the VPS; not started or operationally accepted.** The existing VPS
-still runs Marzban. Separate test settings, certificates and the official image
-are prepared. Available RAM prevents a concurrent test; an authorized maintenance
-window is required. See the [candidate review](audit/3x-ui-candidate.md) for the
-verification scope and remaining gates.
+**Production switched to 3x-ui on 2026-10-25.** Four users and all four transports
+passed server-side HTTPS tests on their original ports; native subscriptions
+passed before and after container recreation. Marzban remains stopped with its
+rollback data retained. Recovery, certificate-rotation and client/observation
+results are tracked in the [deployment review](audit/3x-ui-candidate.md).
 
 ## Architecture
 

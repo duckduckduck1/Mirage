@@ -2,15 +2,16 @@
 
 [README](../README.md) · [Operations](operations.md) · [Recovery](recovery.md) · [Migration](migration.md)
 
-**Status: candidate staged, not started or accepted.** Keep Marzban running during
-preparation. Concurrent testing requires the memory gate below; a sequential test
-requires an explicitly authorized interruption and a ready rollback.
+**Status: production switched on 2026-10-25.** The procedure below retains safe
+alternate-port defaults for a separate installation or rehearsal. Preserve the
+working deployment until a replacement has passed its own checks.
 
 ## Requirements and versions
 
-- Linux host with Docker Engine and Compose v2+, Python 3.10+, OpenSSL, age and age-keygen.
+- Linux host with Docker Engine and Compose v2+, Python 3.10+, OpenSSL and age.
+  Generate the private recovery identity with age-keygen on a trusted workstation.
 - Administrative SSH access, a valid DNS hostname and its existing trusted certificate.
-- At least 512 MiB `MemAvailable`, free test ports and disk space for image archives.
+- A measured memory budget, free test ports and disk space for image archives.
 - A fresh recovery copy of the repaired Marzban installation before server changes.
 
 The [example environment](../.env.example) pins official 3x-ui v3.10.2 and the
@@ -40,14 +41,14 @@ production SQLite or writable Marzban directories. The two services are capped
 at 320 and 64 MiB, with no additional swap budget. Stop the test on memory pressure,
 OOM or degradation of the existing VPN. An occupied test port blocks preparation.
 
-The current VPS has 888 MiB RAM and approximately 304 MiB available during
-preparation, below the concurrent-test gate. The owner authorized stopping Marzban
-after preparation. Do not stop it until secret delivery, rollback material and
-the launch procedure are ready. Announce the interruption, stop Marzban, then
-remeasure memory before starting the candidate. If less than 512 MiB is available,
-restart Marzban and stop the attempt. Retain separate data and test ports; this
-sequential test does not constitute production cutover. Old VPN profiles are
-unavailable while Marzban is stopped.
+The 888 MiB VPS did not meet the original conservative 512 MiB startup gate.
+After measurement, the owner approved a sequential runtime test with the same
+container caps and immediate rollback below 128 MiB available memory, on OOM or
+unexpected container failure. That test passed; an upgrade was not required for
+the measured workload. Limits are ceilings, not preallocated RAM. This result
+does not establish capacity for more users, high concurrency or simultaneous
+recovery clones. Keep the 512 MiB budget for concurrent testing unless separately
+reviewed. Never stop unrelated workloads to meet it implicitly.
 
 Place the checkout at `/opt/mirage`. Create root-owned mode 0700 directories
 `/etc/mirage-test`, `/var/lib/mirage-test`, and its `db` and `tls` subdirectories.
@@ -95,6 +96,8 @@ ssh -N -L 12080:127.0.0.1:12080 ADMIN_USER@SERVER_HOST
 Open `http://127.0.0.1:12080/`, replace default credentials immediately and enable
 TOTP. Keep panel base path `/` for the reviewed secret-delivery helper. The panel
 is published only on host loopback and is not routed through Caddy.
+Run native initialization commands sequentially. Do not run another CLI database
+migration while the first server startup is initializing an empty SQLite database.
 
 ## Panel configuration
 
@@ -126,6 +129,10 @@ security, REALITY keys/SID/SNI/client-version bounds, flow, gRPC service name,
 XHTTP path/mode, TLS and required routing behavior. Set actual inbound ports to
 the test ports: Compose maps each port to itself. Retain 3x-ui's own API/statistics
 plumbing; do not replace its complete core configuration with Marzban's output.
+Resolve Marzban's server-IP placeholder to the actual advertised endpoint. Its
+unspecified fingerprint sentinel `none` is invalid in generated Xray REALITY
+settings; the accepted deployment uses explicit `chrome`. Verify raw and JSON
+output, rather than copying those values verbatim between panels.
 
 Trojan reads `/certs/current/fullchain.pem` and `/certs/current/key.pem` from the
 read-only parent mount. Set `oneTimeLoading=false` and test certificate
