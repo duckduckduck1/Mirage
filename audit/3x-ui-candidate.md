@@ -207,3 +207,28 @@ and foreign-account permissions, and observe at least 48 hours and
 the seven-day retention window. Do not remove the stopped legacy deployment
 before those checks. The production switch does not complete the whole acceptance
 matrix or prove reliability on restricted networks.
+
+## Certificate rotation and bounded observation — 2026-10-25
+
+- Started a fixed 48-hour observation window at 13:11 Europe/Saratov, ending
+  2026-10-27 at 13:11. Resource samples run every minute; actual HTTPS checks
+  cover all sixteen user/transport combinations and both subscription formats
+  every ten minutes. Initial checks passed, including four exact XHTTP payloads.
+- The temporary observer records OOM/restarts, server Xray PID, memory, disk and
+  backup-delivery health. It does not restart VPN components on probe failure.
+  An external workstation follow-up is configured; it requires that workstation
+  and application to remain available. Server collection continues independently.
+- Established one rate-limited, long-lived HTTPS download through Trojan before
+  invoking one forced ECC renewal with the existing acme.sh DNS-01 configuration.
+  The new trusted certificate was issued and Caddy began serving it without
+  restarting its container or Xray. The held Trojan TCP/TLS socket kept transferring.
+- At this record, the test is **waiting for the existing Xray hourly certificate
+  file reload**. It is not yet a passed continuity test. Acceptance requires the
+  new leaf on both listeners, unchanged server core/container identities and the
+  same Trojan connection progressing for at least another minute after reload.
+- Added an independent recovery-identity storage procedure: protected password
+  manager storage plus a disconnected encrypted copy and separately recoverable
+  passphrase. No private identity was copied to the VPS, Telegram or GitHub.
+
+The running window does not complete 48-hour acceptance, the seven-day retention
+period or testing from affected networks. Retain legacy recovery material.

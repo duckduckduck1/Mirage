@@ -154,6 +154,42 @@ test remains open after the explicitly authorized production switch; publishing
 the existing valid pair and checking both listeners does not establish it.
 Automatic restarts are not a fallback for a failed renewal test.
 
+## Bounded migration observation
+
+A temporary 48-hour observation started on **2026-10-25 at 13:11 Europe/Saratov**
+and ends on **2026-10-27 at 13:11 Europe/Saratov**. It does not replace the
+seven-day retention period or establish access from affected Russian networks.
+
+- Every minute: host available memory, disk space, OOM counter, container
+  identity/health/restarts and server Xray PID.
+- Every ten minutes: actual HTTPS through every user/transport combination and
+  trusted raw/JSON subscription requests for all four users. XHTTP exact-payload
+  checks run at the beginning and end.
+- Check daily recovery delivery with a grace period until 04:00 Saratov; flag
+  pending deliveries older than thirty minutes.
+- Notify only on health changes, traffic-check failures/recovery and completion.
+  A failed synthetic request can be caused by its external test endpoint and
+  requires diagnosis; it does not prove an ISP block or VPN outage.
+- Never restart VPN components in response to a probe failure. The observer may
+  restart itself after an observer failure, preserving its original deadline and
+  marking an interrupted certificate rehearsal as failed.
+
+The bounded service is `mirage-observe-48h.service`. Its private status is
+`/etc/mirage/observation-48h-status.json`; samples and helper files are under
+`/var/lib/mirage-observation/`. It uses a temporary client copied from the verified
+official image, with loopback-only SOCKS listeners and private configuration.
+These observation helpers are not dependencies of VPN recovery or the Compose
+services. The observer stops collecting and removes its client configuration
+when the period finishes; retain the reports until they have been reviewed.
+
+The workstation follow-up checks every five minutes during the certificate
+rehearsal, then hourly; it reports incidents and the final result. It
+requires the workstation and its local application to remain available; server
+collection and Telegram notifications continue without them. A complete VPS
+outage also stops its local observer and bot, so the two mechanisms have different
+availability limits. After reviewing completion, disable only the temporary
+observer and remove its remaining temporary files; do not change Compose.
+
 ## Encrypted backups
 
 `infra/backup.py` takes a consistent SQLite backup, checks integrity and encrypts

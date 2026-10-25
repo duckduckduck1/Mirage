@@ -24,6 +24,30 @@ A user list or database alone omits deployment, certificates, renewal state and
 matching binaries. GitHub Secrets are not a downloadable recovery archive and do
 not replace the age identity. Neither the VPS nor Telegram stores that identity.
 
+## Independent identity storage
+
+Keep the private age identity in a password manager independent of this VPS,
+for example a [Bitwarden secure note](https://bitwarden.com/help/managing-items/).
+Protect the account with a strong unique master password and two-factor
+authentication. Keep its account recovery material available offline. Access
+must not depend on the VPN or a vault hosted on the same VPS.
+
+The `age1...` recipient on the VPS is public and cannot decrypt archives. Back up
+the private identity, not just that recipient or the SSH administration key.
+The current workstation copy is GPG-encrypted. Copying its `.gpg` file alone is
+insufficient: retain the separate GPG passphrase in the password manager too.
+Do not store an unencrypted passphrase beside the encrypted file on a USB drive.
+
+Keep another copy of the encrypted identity on a normally disconnected USB drive
+in a separate physical location. Preserve an offline way to obtain its passphrase
+if the password-manager account becomes unavailable. Keep encrypted data/image
+archives as well: a private key does not replace missing archive parts.
+
+Before deleting or moving the original, download the independent copy, decrypt
+it on a trusted workstation and verify it unlocks an actual recovery bundle.
+Keep plaintext out of Git, terminal logs, Telegram and the VPS. Do not rotate the
+age identity merely to move storage: old archives still require the old identity.
+
 ## Verify and decrypt
 
 Download from the private administrator bot conversation. Identify parts by bundle
