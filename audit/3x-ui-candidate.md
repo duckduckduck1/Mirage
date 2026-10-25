@@ -207,3 +207,54 @@ and foreign-account permissions, and observe at least 48 hours and
 the seven-day retention window. Do not remove the stopped legacy deployment
 before those checks. The production switch does not complete the whole acceptance
 matrix or prove reliability on restricted networks.
+
+
+## Follow-up diagnostics — 2026-10-25
+
+The temporary 48-hour observer was stopped at the owner's request. The certificate
+rehearsal was cancelled before Xray's hourly file reload; uninterrupted renewal is
+**not accepted**. A newly issued trusted certificate was published successfully
+and Caddy served it without a container restart. Existing recovery data remains.
+
+Reported client results supersede the earlier broad client acceptance: Trojan
+works consistently, while TCP/gRPC REALITY fail in Throne, Hiddify and Karing;
+XHTTP is intermittent in Throne. Previous same-core loopback checks did not cover
+sing-box compatibility or the affected ISP path.
+
+Isolated tests with the existing credentials reproduced a sing-box 1.13.16 TCP
+REALITY failure against Xray 26.10.10 and 26.10.21. Both TCP and gRPC succeeded
+against a separate official Xray 26.7.28 process. None of these isolated tests
+changed the production core. See the [upstream compatibility report](https://github.com/SagerNet/sing-box/issues/4520).
+
+Xray 26.10.10 was withdrawn upstream; [26.10.21 release notes](https://github.com/XTLS/Xray-core/releases/tag/v26.10.21)
+record the CA security update. A compatibility version must be evaluated separately
+from the current security release; a version change is not a general ISP fix.
+
+
+### Applied compatibility correction and client recheck
+
+- Selected official Xray 26.7.28 through native 3x-ui Core Management. Verified
+  binary SHA-256 `64d46afb80adea1bf97a0d467e83f4a9ac1ebd0995891e84bca3f1a1d1affb1d`.
+  The application image and user credentials did not change. Temporary API access
+  was disabled after the change.
+- Persisted the native managed core and required assets under the existing
+  database volume using `XUI_BIN_FOLDER=/etc/x-ui/bin`. Recreated only 3x-ui and
+  confirmed the same version, healthy container and no OOM/restart counter growth.
+- After recreation, all sixteen user/transport HTTPS requests passed, all four
+  raw/JSON subscription pairs passed, and all four XHTTP 1 MiB payloads had the
+  expected length. The backup inventory reports the actual managed core.
+- Tested archive/extract/execute of the managed binary with its exact checksum.
+  Recovery preserves mode 0700 for executables and 0600 for ordinary private files.
+  This is a targeted recovery check, not a new full encrypted-clone rehearsal.
+- Clean laptop tests required routing mark `0x2024` to bypass the active Throne
+  TUN. Binding only the Wi-Fi interface was insufficient; those earlier failures
+  and timings are not evidence of an MTS block. The owner ran the bounded test
+  locally with sudo. All seven engine/transport cases passed three HTTPS requests
+  and an exact 4 MiB transfer; measured rates ranged from 1.76 to 12.11 Mbit/s.
+  These short measurements do not establish sustained capacity or its bottleneck.
+- The owner confirmed all phone profiles and normal latency. A full Throne restart
+  and subscription refresh restored its two remaining profiles; the same Naruto
+  episode then played normally. No local routing or Wi-Fi settings were changed.
+- Both TLS listeners serve the newly issued leaf. This does not complete the
+  cancelled active-connection certificate-rotation test. The observer stays off;
+  existing size-limited container logs and daily recovery delivery remain.

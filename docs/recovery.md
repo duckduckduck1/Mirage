@@ -24,6 +24,11 @@ A user list or database alone omits deployment, certificates, renewal state and
 matching binaries. GitHub Secrets are not a downloadable recovery archive and do
 not replace the age identity. Neither the VPS nor Telegram stores that identity.
 
+Production also uses a managed official core in `state/db/bin`. Restore it with
+the private Compose environment (`XUI_BIN_FOLDER=/etc/x-ui/bin`), preserving
+the executable's owner-only execute permission. Verify its recorded version and
+checksum before starting; the original image core is a different version.
+
 ## Verify and decrypt
 
 Download from the private administrator bot conversation. Identify parts by bundle

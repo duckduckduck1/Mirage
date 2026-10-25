@@ -133,6 +133,7 @@ class SnapshotTests(PrivateFixture):
         def compose(config, *arguments):
             if arguments[0] == "ps":
                 return (("a" if arguments[-1] == "x-ui" else "b") * 64).encode()
+            self.assertEqual(arguments[-2], environment.get("XUI_BIN_FOLDER", "/app/bin") + "/xray-linux-amd64")
             return b"Xray 26.10.10 (fixture build)\n"
 
         def run(command):
@@ -142,13 +143,21 @@ class SnapshotTests(PrivateFixture):
                 if letter == "a":
                     mounts.append({"Destination": "/etc/x-ui", "Source": environment["DB_DIR"], "RW": True})
                 return json.dumps([{"State": {"Running": True}, "Image": "sha256:" + letter * 64,
-                                    "Config": {"Image": "normalized-reference"}, "Mounts": mounts}]).encode()
+                                    "Config": {"Image": "normalized-reference", "Env":
+                                               ["XUI_BIN_FOLDER=" + environment.get("XUI_BIN_FOLDER", "/app/bin")]},
+                                    "Mounts": mounts}]).encode()
             return json.dumps([images[command[-1]]]).encode()
 
         with mock.patch.object(backup, "compose", side_effect=compose), mock.patch.object(backup, "run", side_effect=run):
             records, core = backup.image_inventory(self.config, environment)
             self.assertEqual(len(records), 2)
             self.assertEqual(core, "Xray 26.10.10")
+            environment["XUI_BIN_FOLDER"] = "/etc/x-ui/bin"
+            self.assertEqual(backup.image_inventory(self.config, environment)[1], "Xray 26.10.10")
+            environment["XUI_BIN_FOLDER"] = "/unsupported"
+            with self.assertRaises(host.SafeError):
+                backup.image_inventory(self.config, environment)
+            environment.pop("XUI_BIN_FOLDER")
             images["sha256:" + "a" * 64]["RepoDigests"] = []
             with self.assertRaises(host.SafeError):
                 backup.image_inventory(self.config, environment)
@@ -190,6 +199,11 @@ class SnapshotTests(PrivateFixture):
     def test_full_bundle_contains_recoverable_database_and_only_acme_cron(self):
         database_dir = self.state / "db"
         database_dir.mkdir(mode=0o700)
+        core_dir = database_dir / "bin"
+        core_dir.mkdir(mode=0o700)
+        core_file = core_dir / "xray-linux-amd64"
+        core_file.write_text("fixture executable")
+        core_file.chmod(0o755)
         with sqlite3.connect(database_dir / "x-ui.db") as database:
             database.execute("CREATE TABLE users (name TEXT)")
             database.execute("INSERT INTO users VALUES ('fixture')")
@@ -211,6 +225,8 @@ class SnapshotTests(PrivateFixture):
             path = backup.build_recovery(self.config, host.read_env(self.config), [], "Xray fixture", "image-fixture", work)
         with tarfile.open(path, "r:gz") as archive:
             self.assertIn("deployment/infra/provision.py", archive.getnames())
+            self.assertEqual(archive.getmember("state/db/bin/xray-linux-amd64").mode, 0o700)
+            self.assertEqual(archive.getmember("state/db/x-ui.db").mode, 0o600)
             self.assertIn("RECOVERY.md", archive.getnames())
             self.assertIn("state/tls-source/fixture", archive.getnames())
             self.assertIn("deployment/panel-access.json", archive.getnames())

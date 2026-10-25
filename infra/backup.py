@@ -58,7 +58,8 @@ def add_tree(archive, source, name):
             raise SafeError("A recovery source contains a special file.")
         info.uid = info.gid = 0
         info.uname = info.gname = "root"
-        info.mode = 0o700 if info.isdir() else 0o600
+        executable = info.isfile() and bool(info.mode & 0o111)
+        info.mode = 0o700 if info.isdir() or executable else 0o600
         return info
 
     archive.add(source, arcname=name, recursive=True, filter=checked)
@@ -66,6 +67,7 @@ def add_tree(archive, source, name):
 
 def image_inventory(config, environment):
     records = []
+    core_folder = "/app/bin"
     for service, variable in (("x-ui", "XUI_IMAGE"), ("caddy", "CADDY_IMAGE")):
         container_id = compose(config, "ps", "-q", service).decode().strip()
         if not re.fullmatch(r"[0-9a-f]{12,64}", container_id):
@@ -79,6 +81,12 @@ def image_inventory(config, environment):
             raise SafeError("The running certificate mount differs from host settings.")
         if service == "x-ui" and mounts.get("/etc/x-ui", {}).get("Source") != environment["DB_DIR"]:
             raise SafeError("The running database mount differs from host settings.")
+        if service == "x-ui":
+            container_env = dict(item.split("=", 1) for item in container["Config"].get("Env", []) if "=" in item)
+            core_folder = container_env.get("XUI_BIN_FOLDER", "/app/bin")
+            if (core_folder not in {"/app/bin", "/etc/x-ui/bin"}
+                    or core_folder != environment.get("XUI_BIN_FOLDER", "/app/bin")):
+                raise SafeError("The running core directory differs from the supported host settings.")
         image = json.loads(run(["docker", "image", "inspect", container["Image"]]))[0]
         if environment[variable].startswith("mirage-recovery/"):
             expected = "sha256:" + environment[variable].rsplit(":", 1)[1]
@@ -95,7 +103,7 @@ def image_inventory(config, environment):
     names = {"amd64": "amd64", "arm64": "arm64", "386": "i386"}
     if architecture not in names:
         raise SafeError("Record the core path for this architecture before using this helper.")
-    version = compose(config, "exec", "-T", "x-ui", "/app/bin/xray-linux-" + names[architecture], "version")
+    version = compose(config, "exec", "-T", "x-ui", core_folder + "/xray-linux-" + names[architecture], "version")
     first_line = version.decode().splitlines()[0]
     match = re.match(r"Xray ([0-9]+(?:\.[0-9]+)+)\b", first_line)
     if not match:

@@ -194,9 +194,32 @@ retry. Retire obsolete image sets only after checking retained snapshots.
 ## Updates and failures
 
 Save matching images/data, test a candidate digest and bundled core in isolation,
-then explicitly pull and recreate services in an agreed window. Never update the
-core inside the container or enable unattended image updates. Repeat subscription,
+then explicitly pull and recreate services in an agreed window. Keep unattended
+image and core updates disabled. Repeat subscription,
 traffic, TLS and recovery checks after changes.
+
+### Core compatibility
+
+Production uses official **Xray 26.7.28** selected through native 3x-ui Core
+Management. The binary SHA-256 is
+`64d46afb80adea1bf97a0d467e83f4a9ac1ebd0995891e84bca3f1a1d1affb1d`.
+It is a pinned compatibility version, not the latest security release.
+Xray 26.10.10 was [withdrawn upstream](https://github.com/XTLS/Xray-core/releases/tag/v26.10.21);
+26.10.21 fixes the reported CA issue but still rejects the tested sing-box REALITY
+handshake. See the [compatibility issue](https://github.com/SagerNet/sing-box/issues/4520).
+
+The official application image remains unchanged. `XUI_BIN_FOLDER=/etc/x-ui/bin`
+in the private Compose environment points native core management at the existing
+persistent database volume. The directory contains the verified official binary,
+matching GeoIP/GeoSite assets and the generated private runtime configuration.
+It must be populated and checked before changing the variable; an empty directory
+cannot run Xray. The example keeps `/app/bin` as its image-default path.
+
+The managed directory is included in encrypted recovery snapshots. The backup
+helper probes the configured binary rather than reporting the unused image core.
+Restore this directory and its private environment together. Recreating 3x-ui must
+preserve both the core version and users. Native version changes restart Xray;
+prepare rollback first. Do not build a custom core or silently switch to latest.
 
 | Symptom | Checks |
 | --- | --- |
