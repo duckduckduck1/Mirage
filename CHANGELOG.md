@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-25 — Production migration to 3x-ui
+
+- Moved four users and four transports to the reviewed official 3x-ui image on
+  their original ports. Preserved VPN credentials; issued native subscription
+  URLs without Marzban API/token compatibility.
+- Verified every user/transport with HTTPS, both subscription formats, cold
+  starts, container recreation and repeated XHTTP connections/exact payloads.
+- Enabled the owner-only native Telegram bot and verified protected production
+  secret delivery. Disabled plaintext native database delivery and temporary
+  administrative API tokens.
+- Moved ACME certificate output/reload to the new deployment and retained the
+  stopped legacy data, images and hooks for rollback.
+- Delivered encrypted data/images to Telegram, downloaded and restored that
+  actual set in isolation, then rechecked production. Enabled daily 03:00 Saratov
+  recovery delivery. Added private download receipts and corrected quoted ACME
+  cron recognition in recovery archives.
+- Recorded the approved bounded-memory test and its successful result without
+  requiring a RAM upgrade. Real-client/TUN, certificate-change continuity,
+  affected-network, foreign-account and observation checks remain separate.
+
 ## 2026-10-24 — VPS test preparation
 
 - Staged separate test configuration and validated TLS copies, cached the official

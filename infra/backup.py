@@ -8,6 +8,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import sqlite3
 import sys
@@ -131,6 +132,8 @@ def build_recovery(config, environment, images, core, image_bundle, work):
             os.chmod(lock.name, 0o600)
             fcntl.flock(lock, fcntl.LOCK_SH)
             add_tree(archive, state / "tls", "state/tls")
+        if (state / "tls-source").exists():
+            add_tree(archive, state / "tls-source", "state/tls-source")
         add_tree(archive, acme_root, "acme")
         project = Path(config["project_dir"])
         add_tree(archive, project / "compose.yaml", "deployment/compose.yaml")
@@ -140,10 +143,20 @@ def build_recovery(config, environment, images, core, image_bundle, work):
         add_tree(archive, project / "docs" / "recovery.md", "RECOVERY.md")
         add_tree(archive, config["env_file"], "deployment/compose.env")
         add_tree(archive, config["config_file"], "deployment/host.json")
+        panel_access = Path(config["config_file"]).parent / "panel-access.json"
+        if panel_access.exists():
+            add_tree(archive, panel_access, "deployment/panel-access.json")
         # Preserve only this ACME job, never unrelated root crontab entries.
         cron = run(["crontab", "-l"]).decode()
         acme_command = str(Path(config["acme_dir"]) / "acme.sh")
-        lines = [line for line in cron.splitlines() if acme_command in line and "--cron" in line]
+        lines = []
+        for line in cron.splitlines():
+            try:
+                words = shlex.split(line, comments=True)
+            except ValueError:
+                continue
+            if acme_command in words and "--cron" in words:
+                lines.append(line)
         if not lines:
             raise SafeError("The expected host ACME schedule was not found.")
         payload = ("\n".join(lines) + "\n").encode()

@@ -139,6 +139,13 @@ def telegram_request(config, method, prefix, file_path=None, suffix=b""):
         if (response.status != 200 or result.get("ok") is not True
                 or str(result["result"]["chat"]["id"]) != str(config["telegram_chat_id"])):
             raise SafeError("Telegram delivery failed; response values were suppressed.")
+        document = result["result"].get("document")
+        if file_path and isinstance(document, dict) and document.get("file_id"):
+            receipts = private_dir(Path(config["state_dir"]) / "telegram-receipts")
+            write_json(receipts / (str(int(result["result"]["message_id"])) + ".json"), {
+                "name": Path(file_path).name, "file_id": document["file_id"],
+                "message_id": result["result"]["message_id"], "sha256": sha256(file_path),
+            })
         return result["result"]["message_id"]
     except SafeError:
         raise

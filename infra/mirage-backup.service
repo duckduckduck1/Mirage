@@ -1,5 +1,5 @@
 [Unit]
-Description=Encrypted Mirage recovery copy to my Telegram chat
+Description=Encrypted Mirage recovery copy to the administrator Telegram chat
 After=network-online.target docker.service
 Wants=network-online.target
 StartLimitIntervalSec=0

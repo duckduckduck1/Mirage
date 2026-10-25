@@ -2,8 +2,8 @@
 
 [README](../README.md) · [Setup](setup.md) · [Recovery](recovery.md) · [Migration](migration.md)
 
-**Status: prepared procedures, not operational acceptance.** These instructions
-apply to the proposed 3x-ui deployment, not the live Marzban installation.
+**Status: 3x-ui production switch completed on 2026-10-25.** Marzban is stopped.
+Remaining acceptance checks are recorded in the [deployment review](../audit/3x-ui-candidate.md).
 
 ## Telegram administration
 
@@ -40,6 +40,8 @@ Vault is not required for this deployment.
 Existing credentials are stored in production as `LEGACY_TELEGRAM_BOT_TOKEN` and
 `DUCKDNS_TOKEN`. The legacy Telegram secret is not consumed by the new workflow.
 Historical encrypted recovery archives are retained separately.
+Both targets use separate restricted SSH identities. Production delivery was
+verified on 2026-10-25 with `apply_bot=false`; it left the running bot and VPN up.
 
 Enter these values directly in GitHub Settings → Environments:
 
@@ -94,8 +96,9 @@ migration. Unprepared or mismatched targets are rejected.
 With `apply_bot=true`, it also applies Telegram settings through the native panel
 API on host loopback, preserving other settings. The native CLI supplies a named
 temporary API token into memory; the token is disabled afterwards. Telegram
-values travel in an HTTP body, not process arguments. This source-reviewed path
-requires testing with the actual image. Enabling the bot can send native messages.
+values travel in an HTTP body, not process arguments. This path was tested with
+the installed image; the owner confirmed the administrative menu and four users.
+Enabling the bot can send native messages.
 
 SSH key files exist only in the runner's private temporary directory and are
 removed afterwards. Errors suppress SSH/API output. For rotation, change the
@@ -124,11 +127,11 @@ disabled. Both services mount the entire TLS parent directory read-only so atomi
 `current` symlink changes remain visible. Use a trusted system CA store in
 production (`ca_file=null`); custom test CAs are for isolated fixtures only.
 
-After successful rehearsal, replace the existing ACME reload command with:
+The production ACME reload command is:
 
 ```bash
 /usr/bin/python3 /opt/mirage/infra/tls.py --config /etc/mirage/host.json \
-  --certificate /PRIVATE_ACME_OUTPUT/fullchain.pem --key /PRIVATE_ACME_OUTPUT/key.pem
+  --certificate /var/lib/mirage/tls-source/fullchain.pem --key /var/lib/mirage/tls-source/key.pem
 ```
 
 Preserve the old hook for rollback. Check every certificate consumer before
@@ -138,11 +141,18 @@ restores the old pair and attempts recovery reload. Telegram failure notificatio
 is attempted when configured. No VPN restart is requested. `--publish-only`
 bootstraps a pair without Docker or Telegram access.
 
+Production acme.sh installs its pair into `/var/lib/mirage/tls-source/` and calls
+the helper directly with `fullchain.pem` and `key.pem`. Renewal no longer depends
+on Marzban directories or its restart command. The previous domain configuration
+and wrapper are retained privately for rollback.
+
 Test Trojan's file reload against the candidate core. The previously reviewed
 Xray implementation polls hourly by default: allow 65 minutes for rehearsal,
 compare served leaf fingerprints on both TLS listeners and maintain an active
-transfer. Files on disk alone are insufficient. A failed continuity/reload test
-blocks cutover; automatic restarts are not a fallback.
+transfer. Files on disk alone are insufficient. This changed-certificate continuity
+test remains open after the explicitly authorized production switch; publishing
+the existing valid pair and checking both listeners does not establish it.
+Automatic restarts are not a fallback for a failed renewal test.
 
 ## Encrypted backups
 

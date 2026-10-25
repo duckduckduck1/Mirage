@@ -2,9 +2,16 @@
 
 [README](../README.md) · [Setup](setup.md) · [Operations](operations.md) · [Migration](migration.md)
 
-**Status: restoration rehearsal pending.** Download and restore a complete
-Telegram delivery before relying on scheduled backups or replacing Marzban.
-Older encrypted Marzban recovery material remains separate.
+**Status: downloaded restoration rehearsal passed on 2026-10-25.** The actual
+Telegram delivery was downloaded, authenticated, decrypted on the workstation
+and restored as a separate VPS project. Four users, both subscription formats
+and all sixteen user/transport combinations passed. Daily backup scheduling is
+enabled. Older encrypted Marzban recovery material remains separate.
+
+The measured prepared-archive restoration check took approximately 44 seconds;
+download/decryption, provisioning a replacement VPS and DNS changes are excluded.
+This is not a measured bare-metal disaster-recovery time or a Marzban rollback test.
+An independent protected copy of the private age identity remains required.
 
 ## Required material
 
@@ -48,16 +55,22 @@ commit or upload plaintext. Remove temporary decrypted data after the rehearsal.
    `docker image inspect` matches those IDs before starting. These are the saved
    official images, not rebuilt images.
 4. Restore `deployment/compose.yaml` and `deployment/infra/` to `/opt/mirage`;
-   private settings to `/etc/mirage`; `state/db` and `state/tls` to `/var/lib/mirage`.
+   private settings to `/etc/mirage`; `state/db`, `state/tls` and, when present,
+   `state/tls-source` to `/var/lib/mirage`. Restore `deployment/panel-access.json`
+   to `/etc/mirage/panel-access.json` when included.
    Use root ownership, directories 0700 and private files 0600. Set image variables
    to the verified recovery tags. Host helpers validate these tags against actual
    immutable image IDs. `pull_policy: never` prevents registry substitution.
 5. For a rehearsal, use separate test project/data paths, test ports and matching
    host JSON. Start with `-f compose.yaml -f infra/restore-isolated.yaml`: its
    internal Docker network must block Internet egress before the copied bot can
-   poll. Verify that restriction, then disable Telegram in the native panel over
-   the SSH tunnel. Only then recreate on the normal test network for traffic
-   checks. Do not run delivery, backup, ACME, DNS or restored cron jobs in the clone.
+   poll. Verify that restriction, then disable Telegram through the native panel
+   or API. An internal Docker network may also prevent access through published
+   host ports: use a container-local administrative API session in that case,
+   passing credentials through private stdin, not process arguments. Verify the
+   saved disabled setting before removing isolation. Only then recreate on the
+   normal test network for traffic checks. Do not run delivery, backup, ACME, DNS
+   or restored cron jobs in the clone.
 6. Verify administrator access, users, UUID/passwords, state, expiry, remaining
    quotas, four assignments, existing 3x-ui subscriptions and actual traffic.
    Repeat cold-start and XHTTP payload checks. Record elapsed recovery time.
@@ -75,6 +88,11 @@ older image against a migrated database without its matching snapshot.
 Restoring the database preserves 3x-ui subscription IDs when public host/port/paths
 remain unchanged. It does not recreate Marzban signing-token semantics. The
 proposed ten-minute rollback target requires measurement, not assumption.
+
+Telegram delivery receipts are stored root-only in `telegram-receipts/` under
+the private state directory. They contain document file IDs and hashes, allowing
+an authorized download rehearsal without forwarding duplicate messages. They do
+not contain the bot token and are not a replacement for downloaded archives.
 
 ## Recovery archive contents
 

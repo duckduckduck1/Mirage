@@ -41,12 +41,15 @@ and egress-isolated Compose configurations and their exposure invariants passed
 without a Docker daemon. Documentation/secret checks and Git whitespace checks
 passed. These results do not replace container or server acceptance.
 
-## Pending acceptance
+## Acceptance still pending at initial review
 
 Actual container startup, native API/bot delivery, all user/transport tests,
 subscription cold starts, GUI/TUN, TLS continuity, downloaded recovery restoration,
 48-hour observation and production cutover remain pending. The current Marzban
 results do not establish these properties for the candidate.
+
+Subsequent results are recorded below; this paragraph describes the initial
+artifact-only review.
 
 ## VPS preparation — 2026-10-24
 
@@ -90,3 +93,117 @@ results do not establish these properties for the candidate.
 - Existing Marzban/Caddy container start times and restart counts remained unchanged.
   Staging files and image caching do not establish application, VPN or subscription
   acceptance.
+
+## Controlled test and production switch — 2026-10-25
+
+The owner approved replacing the original 512 MiB startup gate with a sequential,
+bounded test: stop Marzban, retain the 320/64 MiB service limits without extra
+container swap, and restore service on OOM, unexpected failure or less than
+128 MiB host available memory. The test passed. The owner then explicitly
+authorized the production migration without returning to Marzban.
+
+### Native migration and compatibility
+
+- Imported four active, unlimited, non-expiring users using native 3x-ui APIs,
+  with one client per person attached to four inbounds. No Marzban tables were
+  imported. Preserved UUID/password, REALITY keys/SID/SNI, client-version bound,
+  flow, gRPC service name and XHTTP path/mode. Historical usage stays in the archive.
+- Resolved the old server-IP placeholder to the actual advertised endpoint.
+  Replaced the old `none` fingerprint sentinel with explicit `chrome`: the native
+  JSON generator otherwise emitted an invalid REALITY client configuration.
+- An initial empty-database startup raced with a simultaneous CLI migration.
+  Reinitialized only the empty candidate database sequentially before daemon
+  startup. This was a schema-initialization error, not evidence of insufficient RAM.
+- Applied subscription listener settings with a cold restart. The panel is bound
+  to host loopback; Caddy exposes only native `/sub/` and `/json/` paths.
+- Native JSON uses simplified VLESS settings. Both the bundled Xray 26.10.10 and
+  previous official client 26.7.28 successfully consumed it. The image/core match
+  the reviewed identities; no custom core was installed.
+- Retained the required private-address blocking rule and native API/statistics
+  plumbing. Native default routing also blocks BitTorrent; this is an additional
+  restriction compared with the inspected legacy rules.
+
+### Transport and subscription evidence
+
+- On alternate test ports, all four users × four transports passed real HTTPS
+  traffic. Each user's XHTTP profile passed three additional connections and an
+  exactly 1 MiB download. Both native subscription formats contained four profiles
+  and matched private credentials, ports, REALITY keys, SID and SNI.
+- Forced container recreation preserved native subscription IDs and user data.
+  First and repeated subscriptions and all sixteen traffic combinations passed
+  after recreation. Both reviewed client core versions passed the test matrix.
+- After the authorized switch to original ports 443/8443/2053/9443 and subscription
+  port 2096, all sixteen combinations passed again using client 26.7.28. XHTTP
+  repeat/payload checks also passed for every user. Both TLS listeners served the
+  trusted installed certificate; public panel/login paths returned 404.
+- These are server-loopback client checks, not physical external-client tests.
+  They do not establish Throne GUI/TUN reliability, phone XHTTP support, Beeline,
+  campus Wi-Fi or mobile allowlist reachability.
+
+### Resources and administration
+
+- Measured approximately 124 MiB for 3x-ui/Xray and 16 MiB for Caddy, including
+  their charged file cache. Minimum available host memory during the controlled
+  test was approximately 207 MiB. No candidate swap, runtime OOM or unexpected
+  container restart was observed after initialization. A RAM upgrade was not
+  required for this measured workload; this is not a concurrency capacity claim.
+- The owner confirmed the native bot's administrative menu and four users.
+  Only the owner's ID is configured; friends remain unlinked. Native plaintext
+  database delivery is disabled. Weekly reports and resource/core alerts are
+  configured. A second-account administrative rejection test remains open.
+- Distinct restricted SSH keys and owner-approved main-only Environments protect
+  staging and production delivery. The
+  [production delivery](https://github.com/duckduckduck1/Mirage/actions/runs/40175852874)
+  succeeded with `apply_bot=false`, without a VPN or bot restart.
+- Host acme.sh now installs the existing valid certificate into the new private
+  TLS source directory and calls the managed publication helper directly. The
+  old wrapper/domain configuration and both stopped legacy containers remain
+  available for rollback. DNS updating and unrelated services remain in place.
+- Publishing the current pair and forced Caddy reload passed. A genuinely changed
+  certificate, Xray's delayed file reload and uninterrupted active transfer still
+  need a separate continuity rehearsal. No such result is inferred from files
+  or the unchanged certificate's successful TLS handshake.
+
+### Downloaded recovery and handoff
+
+- Delivered the official image archive in eight encrypted parts and the recovery
+  archive in one part, with manifests and SHA256 checksums, to the owner's private
+  Telegram chat. Downloaded those actual Telegram documents using private delivery
+  receipts and verified every checksum. Retained an encrypted external copy.
+- Decrypted on the workstation with the age identity held in memory. Verified
+  SQLite integrity, four identities, required TLS/ACME/deployment state, image
+  content hashes and the image-bundle reference. The private identity never went
+  to the VPS; temporary local plaintext was removed.
+- Loaded the downloaded matching image payload and restored separate data with
+  verified image-ID tags. Initially blocked clone Internet egress and disabled
+  its copied bot through the container-local native API before normal networking.
+  Published host-port access was unavailable in the isolated network; the first
+  probe attempt resumed production safely before that access method was corrected.
+- Restored four subscription IDs and all private connection parameters. On the
+  clone's alternate ports, first/repeated raw and JSON subscriptions passed,
+  followed by sixteen HTTPS combinations, twelve additional XHTTP connections
+  and four exactly 1 MiB downloads. Prepared-archive validation took about
+  44 seconds; download/decryption and new-host provisioning are excluded.
+- Stopped the clone, resumed production and repeated the same subscription/traffic
+  matrix successfully. The production bot remained enabled; the clone's bot was
+  disabled. Temporary administrative API tokens were disabled after checks.
+- Enabled daily encrypted recovery delivery at 03:00 Europe/Saratov, with
+  persistent scheduling and fifteen-minute failure retries. Initial real delivery
+  and download were verified; the next scheduled run remains future evidence.
+- Sent the new native raw/JSON links only to the owner through the new bot.
+  No messages were sent to friends. Legacy containers remain stopped, and the
+  temporary automatic legacy-return guard was completed.
+- The owner confirmed successful import of the new subscriptions and connections
+  from a real client. Exact client/build, transport and TUN/proxy mode were not
+  recorded in that confirmation; it does not complete the detailed client matrix.
+- Removed the temporary restore clone, test clients and plaintext restore inputs
+  after successful checks. Private verification reports and encrypted recovery
+  copies remain retained. The production containers were not restarted for cleanup.
+
+### Outstanding operational acceptance
+
+Verify the next scheduled delivery, test real clients, certificate continuity
+and foreign-account permissions, and observe at least 48 hours and
+the seven-day retention window. Do not remove the stopped legacy deployment
+before those checks. The production switch does not complete the whole acceptance
+matrix or prove reliability on restricted networks.

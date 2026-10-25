@@ -2,10 +2,12 @@
 
 [README](../README.md) · [Setup](setup.md) · [Operations](operations.md) · [Recovery](recovery.md)
 
-**Status: test files and image staged; no 3x-ui service started or migration performed.**
+**Status: production switched to official 3x-ui on 2026-10-25.**
+Four users and four transports passed server-side traffic/subscription checks.
+Legacy data is retained for rollback; observation and client acceptance remain separate.
 Historical checks below apply to Marzban. They are not acceptance of the new setup.
 
-## Existing deployment
+## Retained legacy deployment
 
 Observed after maintenance on 2026-10-24:
 
@@ -99,13 +101,15 @@ repaired Marzban, A-13 image, Xray v26.7.28, SQLite/signing state, configuration
 TLS/ACME, Caddy and four external maintenance scripts. The older archive is not a
 fresh recovery copy of the repaired core.
 
-Keep existing services running during preparation. Concurrent testing requires
-512 MiB available memory. The current VPS does not meet that gate; the owner
-authorized a sequential test after preparation, with Marzban stopped and its
-data preserved. Follow the [memory and interruption procedure](setup.md#test-isolation),
-remeasure memory after stopping and restore Marzban if the gate still fails.
+Keep existing services running during preparation. The original concurrent-test
+budget was 512 MiB available memory. On this host, the owner instead approved a
+sequential test with Marzban stopped, unchanged container caps and immediate
+rollback below 128 MiB available memory, on OOM or unexpected failure. The
+controlled test passed; the later production switch was explicitly authorized.
+See the [memory and interruption procedure](setup.md#test-isolation).
 Keep separate data/network, alternate ports and a new bot. Stop on pressure or
-OOM. Do not change production DNS, ACME hooks or the active GUI VPN for testing.
+OOM. Keep production DNS, ACME hooks and the active GUI VPN unchanged during
+isolated testing; change production consumers only during the approved cutover.
 Several transports on one IP do not provide independent IP redundancy.
 
 Transfer all users through native tools. Preserve UUID/password, state, expiry,

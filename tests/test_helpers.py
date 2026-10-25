@@ -52,6 +52,25 @@ class PrivateFixture(unittest.TestCase):
 
 
 class ConfigurationTests(PrivateFixture):
+    def test_document_receipt_preserves_download_id_without_bot_token(self):
+        document = self.root / "fixture.age.part"
+        document.write_bytes(b"encrypted fixture")
+        response = mock.Mock(status=200)
+        response.read.return_value = json.dumps({
+            "ok": True, "result": {"message_id": 17, "chat": {"id": 123456789},
+                                    "document": {"file_id": "fixture-file-id"}},
+        }).encode()
+        connection = mock.Mock()
+        connection.getresponse.return_value = response
+        with mock.patch.object(host.http.client, "HTTPSConnection", return_value=connection):
+            self.assertEqual(host.send_document(self.config, document, "Fixture"), 17)
+        receipt = self.state / "telegram-receipts" / "17.json"
+        saved = json.loads(receipt.read_text())
+        self.assertEqual(saved["file_id"], "fixture-file-id")
+        self.assertEqual(saved["sha256"], host.sha256(document))
+        self.assertEqual(receipt.stat().st_mode & 0o777, 0o600)
+        self.assertNotIn(fixture_token(), receipt.read_text())
+
     def test_private_mode_and_environment_mismatch_are_rejected(self):
         self.config_path.chmod(0o644)
         with self.assertRaises(host.SafeError):
@@ -177,17 +196,24 @@ class SnapshotTests(PrivateFixture):
         certificate_root = self.state / "tls"
         certificate_root.mkdir(mode=0o700)
         (certificate_root / "fixture").write_text("fixture TLS state")
+        tls_source = self.state / "tls-source"
+        tls_source.mkdir(mode=0o700)
+        (tls_source / "fixture").write_text("fixture ACME output")
+        (self.config_path.parent / "panel-access.json").write_text('{"fixture": true}')
         acme = Path(self.config["acme_dir"])
         acme.mkdir(mode=0o700)
         (acme / "account.conf").write_text("fixture ACME account")
         work = self.root / "work"
         work.mkdir(mode=0o700)
-        cron = ("0 0 * * * /unrelated/private-job\n0 1 * * * " + str(acme / "acme.sh") + " --cron\n").encode()
+        cron = ('0 0 * * * /unrelated/private-job\n0 1 * * * "' + str(acme)
+                + '"/acme.sh --cron --home "' + str(acme) + '"\n').encode()
         with mock.patch.object(backup, "run", return_value=cron):
             path = backup.build_recovery(self.config, host.read_env(self.config), [], "Xray fixture", "image-fixture", work)
         with tarfile.open(path, "r:gz") as archive:
             self.assertIn("deployment/infra/provision.py", archive.getnames())
             self.assertIn("RECOVERY.md", archive.getnames())
+            self.assertIn("state/tls-source/fixture", archive.getnames())
+            self.assertIn("deployment/panel-access.json", archive.getnames())
             metadata = json.load(archive.extractfile("manifest.json"))
             self.assertEqual(metadata["image_bundle"], "image-fixture")
             cron_snapshot = archive.extractfile("host/acme-cron.txt").read()
