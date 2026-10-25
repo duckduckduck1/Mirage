@@ -7,6 +7,7 @@ services:
       TZ: Europe/Saratov
       XUI_PORT: "12080"
       XUI_DB_TYPE: sqlite
+      XUI_BIN_FOLDER: ${XUI_BIN_FOLDER:-/app/bin}
       XUI_ENABLE_FAIL2BAN: "false"
       XUI_TUNNEL_HEALTH_MONITOR: "false"
     ports:
