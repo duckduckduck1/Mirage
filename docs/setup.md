@@ -20,10 +20,12 @@ identities before a later deployment; do not substitute a moving tag.
 
 The upstream [Compose file](https://github.com/MHSanaei/3x-ui/blob/v3.10.2/docker-compose.yml)
 builds the application locally. This repository instead consumes its official
-image. The extracted amd64 core reports Xray 26.10.10; the upstream release/tag
-was unavailable, while the reported source commit exists. See the
-[candidate review](../audit/3x-ui-candidate.md). Validate the actual container/core
-and client compatibility before cutover. Do not replace the core inside the image.
+image. Its bundled amd64 core is Xray 26.10.10, subsequently withdrawn upstream.
+Do not treat this image/core combination as an accepted fresh installation.
+Production uses an official core selected through native 3x-ui Core Management
+and persisted separately; see [core compatibility](operations.md#core-compatibility).
+Validate the actual core and clients before public exposure. The
+[candidate review](../audit/3x-ui-candidate.md) records the limitations.
 
 ## Test isolation
 

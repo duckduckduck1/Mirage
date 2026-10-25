@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-25 — REALITY client compatibility
+
+- Reproduced the bundled core's REALITY incompatibility with sing-box. Selected
+  official Xray 26.7.28 through native 3x-ui management, retained the official
+  application image, and persisted the verified core across container recreation.
+- Corrected recovery inventory to inspect the managed core and preserve execute
+  permission when archiving it.
+- Rechecked all four users and transports, raw/JSON subscriptions and XHTTP
+  payloads. Owner confirmed phone profiles, Throne after restart and video playback.
+- Cancelled the temporary 48-hour observer and incomplete certificate continuity
+  rehearsal at the owner's request; neither is reported as accepted.
+
 ## 2026-10-25 — Production migration to 3x-ui
 
 - Moved four users and four transports to the reviewed official 3x-ui image on
