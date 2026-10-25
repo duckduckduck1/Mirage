@@ -57,11 +57,21 @@ its token in an issue, command argument or checkout. Store the age recovery
 identity in an independent protected store/password manager, never on the VPS
 or in Telegram.
 
+In [BotFather](https://t.me/BotFather), send `/newbot`, choose a display name and
+an available username ending in `bot`. Add the returned token directly to
+`vpn-staging` as `TELEGRAM_BOT_TOKEN`; do not send it through chat. Open the new
+bot and press **Start**. Configure the owner's verified positive numeric ID as
+`TELEGRAM_ADMIN_ID`. See the [official token instructions](https://core.telegram.org/bots/tutorial#obtain-your-bot-token).
+
 ### Manual delivery
 
 The [delivery workflow](../.github/workflows/secrets.yml) runs only by manual
 dispatch from `main`, after environment approval. It does not install, migrate,
 renew certificates or restart the VPN. PR checks have no runtime secrets.
+The workflow must first be merged into `main`. If a run waits for protection
+approval, open **Review deployments**, select the requested Environment and
+approve it as its designated owner. Do not remove branch/reviewer protections
+to bypass that gate.
 
 Before dispatch, separately authorize host preparation. Install a root-owned
 checkout at `/opt/mirage` and prepare private Compose/host settings. Verify SSH

@@ -5,10 +5,11 @@ based on [3x-ui](https://github.com/MHSanaei/3x-ui), Xray and SQLite.
 
 ## Status
 
-**Prepared for migration; not deployed or operationally accepted.** The existing
-VPS still runs Marzban. This change does not access the VPS, test live
-subscriptions or send Telegram messages. See the [candidate review](audit/3x-ui-candidate.md)
-for the scope of local verification.
+**Staged on the VPS; not started or operationally accepted.** The existing VPS
+still runs Marzban. Separate test settings, certificates and the official image
+are prepared. Available RAM prevents a concurrent test; an authorized maintenance
+window is required. See the [candidate review](audit/3x-ui-candidate.md) for the
+verification scope and remaining gates.
 
 ## Architecture
 
