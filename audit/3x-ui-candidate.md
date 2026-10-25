@@ -193,6 +193,12 @@ authorized the production migration without returning to Marzban.
 - Sent the new native raw/JSON links only to the owner through the new bot.
   No messages were sent to friends. Legacy containers remain stopped, and the
   temporary automatic legacy-return guard was completed.
+- The owner confirmed successful import of the new subscriptions and connections
+  from a real client. Exact client/build, transport and TUN/proxy mode were not
+  recorded in that confirmation; it does not complete the detailed client matrix.
+- Removed the temporary restore clone, test clients and plaintext restore inputs
+  after successful checks. Private verification reports and encrypted recovery
+  copies remain retained. The production containers were not restarted for cleanup.
 
 ### Outstanding operational acceptance
 
