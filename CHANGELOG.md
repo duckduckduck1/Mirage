@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-26 — Legacy and staging retirement
+
+- Removed the stopped Marzban, old Caddy and staging containers, their dedicated
+  Docker resources and unused legacy images.
+- Removed explicitly authorized old project/data/backup copies, retired recovery
+  helpers and units, the cancelled observer, and the staging SSH account/key directory.
+- Preserved production configuration, user credentials, subscriptions, bot settings,
+  external recovery archives and shared ACME/DNS/SSH/MTU components. Verified four
+  transports and all raw/JSON subscriptions without restarting protected services.
+- Documented that local Marzban rollback and staging delivery are no longer
+  available. Confirmed there is no CPU quota or observed CPU throttling.
+
+## 2026-10-26 — Production memory limit
+
+- Diagnosed an Xray kill as cgroup OOM at the inherited 320 MiB test limit;
+  confirmed Marzban remained stopped and nightly archives came from the new timer.
+- Increased the production 3x-ui ceiling to 512 MiB without restarting the
+  container or Xray. Kept the isolated test example at 320 MiB and preserved
+  the no-swap policy. Recorded the distinction between host and container pressure.
+
 ## 2026-10-25 — REALITY client compatibility
 
 - Reproduced the bundled core's REALITY incompatibility with sing-box. Selected

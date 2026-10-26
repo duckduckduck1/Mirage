@@ -40,7 +40,10 @@ Vault is not required for this deployment.
 Existing credentials are stored in production as `LEGACY_TELEGRAM_BOT_TOKEN` and
 `DUCKDNS_TOKEN`. The legacy Telegram secret is not consumed by the new workflow.
 Historical encrypted recovery archives are retained separately.
-Both targets use separate restricted SSH identities. Production delivery was
+The original targets used separate restricted SSH identities. The staging account,
+key directory and sudo rule were removed on 2026-10-26; `vpn-staging` remains in
+GitHub but cannot deliver until a new test host/account is explicitly prepared.
+Production delivery and its restricted identity remain configured. Delivery was
 verified on 2026-10-25 with `apply_bot=false`; it left the running bot and VPN up.
 
 Enter these values directly in GitHub Settings → Environments:
@@ -118,7 +121,8 @@ sudo journalctl -u mirage-backup.service --since '1 day ago'
 Inspect logs privately; they may contain addresses or client links. Production
 host settings are `/etc/mirage/host.json`, Compose settings are
 `/etc/mirage/compose.env`, and data is `/var/lib/mirage`. The test equivalents are
-`/etc/mirage-test` and `/var/lib/mirage-test`.
+`/etc/mirage-test` and `/var/lib/mirage-test`; the previous installation at those
+paths was removed on 2026-10-26.
 
 ## Certificates
 
@@ -134,7 +138,7 @@ The production ACME reload command is:
   --certificate /var/lib/mirage/tls-source/fullchain.pem --key /var/lib/mirage/tls-source/key.pem
 ```
 
-Preserve the old hook for rollback. Check every certificate consumer before
+Check every certificate consumer before
 changing existing output locations. The helper validates hostname, trust, expiry
 and key match; publishes a versioned pair; and forces Caddy reload. Failed reload
 restores the old pair and attempts recovery reload. Telegram failure notification
@@ -143,8 +147,9 @@ bootstraps a pair without Docker or Telegram access.
 
 Production acme.sh installs its pair into `/var/lib/mirage/tls-source/` and calls
 the helper directly with `fullchain.pem` and `key.pem`. Renewal no longer depends
-on Marzban directories or its restart command. The previous domain configuration
-and wrapper are retained privately for rollback.
+on Marzban directories or its restart command. Legacy renewal rollback copies
+were removed with the old installation on 2026-10-26. The production ACME account,
+certificate source and reload command above remain in use.
 
 Test Trojan's file reload against the candidate core. The previously reviewed
 Xray implementation polls hourly by default: allow 65 minutes for rehearsal,
@@ -230,3 +235,33 @@ prepare rollback first. Do not build a custom core or silently switch to latest.
 
 TCP connection, profile import and ping are not sufficient traffic evidence.
 Several transports on one IP do not provide an independent IP fallback.
+
+### Memory limits
+
+Production sets `XUI_MEMORY_LIMIT=512m`; the isolated test example retains 320m.
+The same value applies to memory and combined memory/swap, so the container has
+no swap allowance. This is a ceiling, not a reservation of host RAM.
+
+On 2026-10-26 at 10:39 Europe/Saratov, a cgroup OOM killed Xray under the original
+320 MiB limit. The kernel recorded `CONSTRAINT_MEMCG` and `oom_kill=1`. Marzban
+was stopped; the 03:00 recovery delivery came from `mirage-backup.timer`.
+
+Check both container `memory.events` and host `MemAvailable` before attributing a
+kill to the VPS size. `signal: killed` alone does not identify the cause. Existing
+OOM counters and Docker's OOM flag remain historical evidence after a live limit
+change; compare timestamps and counter deltas to identify a new event.
+
+The limit can be increased on the running container with `docker update`, without
+restarting Xray; keep the private environment and Compose configuration consistent.
+Do not disable the OOM killer or add automatic VPN restarts to hide memory pressure.
+
+### CPU alerts
+
+The one-vCPU host has no Docker CPU quota for 3x-ui: `cpu.max` is `max 100000`,
+with no configured NanoCPUs, quota or CPU pinning. The recorded check found zero
+throttled periods/time. An 80% Telegram threshold is an alert setting, not a CPU
+cap. The [native Linux sampler](https://github.com/MHSanaei/3x-ui/blob/v3.10.2/internal/util/sys/sys_linux.go)
+reads aggregate `/proc/stat`, so its alert reflects host activity rather than
+only the panel/core process. Compare it with container cgroup deltas and host
+process samples. Short current samples cannot identify the process responsible
+for an earlier spike. CPU settings and notification thresholds were not changed.

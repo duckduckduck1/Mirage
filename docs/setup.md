@@ -6,13 +6,16 @@
 alternate-port defaults for a separate installation or rehearsal. Preserve the
 working deployment until a replacement has passed its own checks.
 
+The previous staging installation was removed on 2026-10-26. These test paths
+describe a future isolated rehearsal, not an existing server installation.
+
 ## Requirements and versions
 
 - Linux host with Docker Engine and Compose v2+, Python 3.10+, OpenSSL and age.
   Generate the private recovery identity with age-keygen on a trusted workstation.
 - Administrative SSH access, a valid DNS hostname and its existing trusted certificate.
 - A measured memory budget, free test ports and disk space for image archives.
-- A fresh recovery copy of the repaired Marzban installation before server changes.
+- A current recovery copy of the existing production deployment before changing it.
 
 The [example environment](../.env.example) pins official 3x-ui v3.10.2 and the
 existing Caddy version/digest observed on 2026-10-24. Recheck the running image
@@ -40,7 +43,9 @@ Validate the actual core and clients before public exposure. The
 
 Use a separate Compose project, bridge network and data directories. Never share
 production SQLite or writable Marzban directories. The two services are capped
-at 320 and 64 MiB, with no additional swap budget. Stop the test on memory pressure,
+at 320 and 64 MiB in the example, with no additional swap budget. Production uses
+`XUI_MEMORY_LIMIT=512m` after a confirmed container-limit OOM; its original 320 MiB
+test cap was insufficient under real use. Stop the test on memory pressure,
 OOM or degradation of the existing VPN. An occupied test port blocks preparation.
 
 The 888 MiB VPS did not meet the original conservative 512 MiB startup gate.

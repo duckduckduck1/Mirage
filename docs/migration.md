@@ -4,10 +4,12 @@
 
 **Status: production switched to official 3x-ui on 2026-10-25.**
 Four users and four transports passed server-side traffic/subscription checks.
-Legacy data is retained for rollback; observation and client acceptance remain separate.
+The legacy installation and staging were removed on 2026-10-26 after explicit
+owner authorization. No local Marzban rollback remains; observation and other
+acceptance limits are recorded separately.
 Historical checks below apply to Marzban. They are not acceptance of the new setup.
 
-## Retained legacy deployment
+## Historical legacy deployment
 
 Observed after maintenance on 2026-10-24:
 
@@ -155,6 +157,11 @@ rollback. Preserved cached credentials are not subscription-URL compatibility.
 The four VPN ports and validated credentials remain unchanged.
 
 ### Rollback and observation
+
+**Historical procedure:** the retained local installation described below was
+removed on 2026-10-26. It cannot be started again from this VPS. Any legacy
+reconstruction requires independently retained archives and their matching keys;
+those archives may predate later repairs. Current recovery uses the 3x-ui bundle.
 
 Roll back immediately on missing users, incorrect credentials/TLS, transport
 regression or unstable processes. Stop the new project, preserve diagnostics,
