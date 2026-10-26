@@ -258,3 +258,29 @@ from the current security release; a version change is not a general ISP fix.
 - Both TLS listeners serve the newly issued leaf. This does not complete the
   cancelled active-connection certificate-rotation test. The observer stays off;
   existing size-limited container logs and daily recovery delivery remain.
+
+
+## Cgroup OOM correction — 2026-10-26
+
+At 10:39 Europe/Saratov the kernel killed Xray inside the production 3x-ui
+container. The log identifies `CONSTRAINT_MEMCG`; `memory.events` records one
+OOM and one kill under its original 320 MiB ceiling. This establishes a container
+limit failure, not evidence that a second running Marzban exhausted host RAM.
+Marzban, old Caddy and staging containers were stopped; only production services
+and the unrelated media-bot workload were running.
+
+Raised production memory and combined memory/swap limits to 512 MiB using
+`docker update`. The container identity/start time and Xray PID were unchanged.
+Before the change the host had about 362 MiB available. The private environment
+now records the new limit; the shared Compose defaults to 512 MiB while the
+isolated test example explicitly retains 320 MiB. No swap allowance was added.
+
+After the change, actual HTTPS passed through each of the four transports and
+all four raw/JSON subscription pairs passed. The OOM kill counter remained one,
+the container was healthy and host available memory remained about 362 MiB.
+This short check does not establish a long-term memory plateau.
+
+The 03:00 three-part `Mirage recovery` delivery came from the new
+`mirage-backup.timer`. An obsolete root cron entry referencing the old Marzban
+backup was also removed, retaining a root-only rollback copy. The new timer,
+ACME and DNS jobs remain; stopped legacy data is retained for rollback.

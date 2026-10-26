@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-26 — Production memory limit
+
+- Diagnosed an Xray kill as cgroup OOM at the inherited 320 MiB test limit;
+  confirmed Marzban remained stopped and nightly archives came from the new timer.
+- Increased the production 3x-ui ceiling to 512 MiB without restarting the
+  container or Xray. Kept the isolated test example at 320 MiB and preserved
+  the no-swap policy. Recorded the distinction between host and container pressure.
+
 ## 2026-10-25 — REALITY client compatibility
 
 - Reproduced the bundled core's REALITY incompatibility with sing-box. Selected

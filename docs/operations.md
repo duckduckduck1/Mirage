@@ -230,3 +230,22 @@ prepare rollback first. Do not build a custom core or silently switch to latest.
 
 TCP connection, profile import and ping are not sufficient traffic evidence.
 Several transports on one IP do not provide an independent IP fallback.
+
+### Memory limits
+
+Production sets `XUI_MEMORY_LIMIT=512m`; the isolated test example retains 320m.
+The same value applies to memory and combined memory/swap, so the container has
+no swap allowance. This is a ceiling, not a reservation of host RAM.
+
+On 2026-10-26 at 10:39 Europe/Saratov, a cgroup OOM killed Xray under the original
+320 MiB limit. The kernel recorded `CONSTRAINT_MEMCG` and `oom_kill=1`. Marzban
+was stopped; the 03:00 recovery delivery came from `mirage-backup.timer`.
+
+Check both container `memory.events` and host `MemAvailable` before attributing a
+kill to the VPS size. `signal: killed` alone does not identify the cause. Existing
+OOM counters and Docker's OOM flag remain historical evidence after a live limit
+change; compare timestamps and counter deltas to identify a new event.
+
+The limit can be increased on the running container with `docker update`, without
+restarting Xray; keep the private environment and Compose configuration consistent.
+Do not disable the OOM killer or add automatic VPN restarts to hide memory pressure.

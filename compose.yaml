@@ -28,8 +28,8 @@ services:
         read_only: true
         bind:
           create_host_path: false
-    mem_limit: 320m
-    memswap_limit: 320m
+    mem_limit: ${XUI_MEMORY_LIMIT:-512m}
+    memswap_limit: ${XUI_MEMORY_LIMIT:-512m}
     pids_limit: 256
     cap_drop: [NET_RAW]
     security_opt: [no-new-privileges:true]
