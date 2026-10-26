@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-26 — Local resource diagnosis
+
+- Added a low-priority, standard-library sampler for host/process/container CPU,
+  memory, OOM, throttling, swap, I/O and pressure counters every 15 seconds.
+- Keep private, rotating JSONL history within 64 MiB with seven-day archive expiry.
+  No new notifications, traffic logging, uploads or automatic VPN restarts.
+- Added failure-path and attribution tests and documented interpretation and removal.
+
 ## 2026-10-26 — Legacy and staging retirement
 
 - Removed the stopped Marzban, old Caddy and staging containers, their dedicated

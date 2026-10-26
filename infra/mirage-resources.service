@@ -1,0 +1,29 @@
+[Unit]
+Description=Local bounded CPU and memory history for Mirage diagnosis
+After=docker.service
+
+[Service]
+Type=simple
+User=root
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/mirage/infra/resources.py
+Restart=on-failure
+RestartSec=30s
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=64M
+TasksMax=32
+LogsDirectory=mirage-resources
+LogsDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+ReadWritePaths=/var/log/mirage-resources
+
+[Install]
+WantedBy=multi-user.target
