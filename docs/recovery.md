@@ -109,5 +109,8 @@ bundle referenced by retained recovery snapshots.
 
 Historical encrypted files under `~/.local/share/mirage/` remain recovery material,
 not the new runtime token source. Retain an independent archive copy and its key
-separately. Marzban rollback still requires its A-13 image, core, signing state,
-configuration and external scripts; see [Migration](migration.md#migration-to-3x-ui).
+separately. The legacy installation was removed from the VPS on 2026-10-26.
+Reconstructing it requires an independent archive with its A-13 image, core,
+signing state, configuration and external scripts; it is no longer a local
+rollback option. Older archives may predate later repairs. See
+[Migration](migration.md#migration-to-3x-ui).

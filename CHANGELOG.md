@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-26 — Legacy and staging retirement
+
+- Removed the stopped Marzban, old Caddy and staging containers, their dedicated
+  Docker resources and unused legacy images.
+- Removed explicitly authorized old project/data/backup copies, retired recovery
+  helpers and units, the cancelled observer, and the staging SSH account/key directory.
+- Preserved production configuration, user credentials, subscriptions, bot settings,
+  external recovery archives and shared ACME/DNS/SSH/MTU components. Verified four
+  transports and all raw/JSON subscriptions without restarting protected services.
+- Documented that local Marzban rollback and staging delivery are no longer
+  available. Confirmed there is no CPU quota or observed CPU throttling.
+
 ## 2026-10-26 — Production memory limit
 
 - Diagnosed an Xray kill as cgroup OOM at the inherited 320 MiB test limit;

@@ -7,8 +7,9 @@ based on [3x-ui](https://github.com/MHSanaei/3x-ui), Xray and SQLite.
 
 **Production switched to 3x-ui on 2026-10-25.** Four users and all four transports
 passed server-side HTTPS tests on their original ports; native subscriptions
-passed before and after container recreation. Marzban remains stopped with its
-rollback data retained. Recovery, certificate-rotation and client/observation
+passed before and after container recreation. The legacy installation and staging
+were removed on 2026-10-26; local Marzban rollback is retired. Recovery,
+certificate-rotation and client/observation
 results are tracked in the [deployment review](audit/3x-ui-candidate.md).
 The [core compatibility pin](docs/operations.md#core-compatibility) restored phone
 profiles; restarting Throne restored its TCP/gRPC connections as well.

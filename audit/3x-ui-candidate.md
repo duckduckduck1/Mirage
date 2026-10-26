@@ -284,3 +284,48 @@ The 03:00 three-part `Mirage recovery` delivery came from the new
 `mirage-backup.timer`. An obsolete root cron entry referencing the old Marzban
 backup was also removed, retaining a root-only rollback copy. The new timer,
 ACME and DNS jobs remain; stopped legacy data is retained for rollback.
+
+
+## Legacy and staging retirement — 2026-10-26
+
+The owner explicitly authorized deleting the old installation, historical
+Marzban/test recovery material and the separate staging SSH identity. Removed:
+
+- Four stopped Marzban/old-Caddy/staging containers, three dedicated networks,
+  four old Caddy volumes and both Marzban image references.
+- The unused old operations image, legacy deployment/data directories, old
+  project copies, previous-core audit copies and old admin-restore material.
+- Five disabled legacy/temporary systemd units and their obsolete helpers,
+  the cancelled observer and the staging account, home/key directory and sudo rule.
+
+The root-owned staging home required explicit removal after `userdel` removed the
+account but could not remove that directory. Current 3x-ui data, images, recovery
+bundles and the independent workstation archives were preserved. Shared ACME,
+DuckDNS, SSH safeguards and MTU configuration remain; this is not a global prune.
+
+Post-cleanup comparisons passed for protected container configurations/identities,
+start times/restart counts, Xray PID, production files, root cron, native user,
+inbound and bot settings, and all eight raw/JSON subscription bodies. Actual HTTPS
+passed through all four transports. Production backup/DNS timers remain active.
+Mount lists were canonicalized for comparison because Docker inspect can reorder
+them for the unchanged media-bot containers.
+
+The dedicated Docker cleanup happened before historical file removal. Its first
+raw mount-order comparison flagged a difference; subsequent inspection established
+that the variation was only list order. The final canonical comparison passed.
+No protected container was restarted. The source archive tag remains available;
+there is no longer a local Marzban rollback installation or staging delivery target.
+
+### CPU alert investigation
+
+The host has one logical CPU. Docker CPU quota, NanoCPUs and pinning are unset;
+`cpu.max` is `max 100000`, and throttled periods/time were zero. After cleanup, a
+10-second sample measured about 8.82% for the 3x-ui cgroup and 23.66% host non-idle
+activity (including about 0.20% I/O wait and 4.06% steal). Xray was the largest
+current userspace consumer at about 5.39% in that sample.
+
+The native Linux sampler reads aggregate `/proc/stat`; the bot compares that
+percentage with its configured threshold. The reported 80% is an alert threshold,
+not an enforced Docker cap. Historical 83–97% alerts cannot be attributed to one
+process from current samples. No CPU quota or notification setting was changed,
+and no daily monitor or automatic VPN restart was added.
