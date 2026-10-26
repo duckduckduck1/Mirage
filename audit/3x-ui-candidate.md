@@ -329,3 +329,29 @@ percentage with its configured threshold. The reported 80% is an alert threshold
 not an enforced Docker cap. Historical 83–97% alerts cannot be attributed to one
 process from current samples. No CPU quota or notification setting was changed,
 and no daily monitor or automatic VPN restart was added.
+
+## Bounded resource history — 2026-10-26
+
+Installed `infra/resources.py` and `mirage-resources.service` independently of
+Compose, following owner approval for local CPU/memory diagnosis. The unit passed
+host `systemd-analyze verify`, is enabled/running and produces JSONL snapshots at
+approximately 15-second intervals. It does not upload logs, send messages or
+restart VPN services. Existing native bot alert thresholds remain unchanged.
+
+The log directory is root-only 0700 and files are 0600. Rotation is bounded by
+64 MiB total with 4 MiB segments and seven-day archive expiry; volume retention
+can be shorter. Tests exercised rotation at reduced limits, private file handling,
+PID reuse and CPU/OOM deltas. Resource JSONL files are ignored by Git.
+
+The initial seven records included all four running containers. A separate
+45-second steady measurement found about 0.98% of one CPU and 7.73 MiB charged
+memory for the collector; its own service has a 64 MiB memory cap and low CPU/I/O
+priority. These are short measurements, not a guarantee of future usage.
+
+Protected container identities, start times, restart counts, images/configuration
+fingerprints and the Xray PID were unchanged. Private production settings were
+unchanged. No new host/container OOM increments or collector restarts were seen.
+The root-only deployment/verification report is
+`/var/lib/mirage-resources-deployment.json`. No historical spike is attributed to
+a process on the basis of these new samples; future analysis must correlate the
+recorded interval with process/cgroup counters and kernel/application events.

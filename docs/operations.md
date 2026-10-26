@@ -265,3 +265,57 @@ reads aggregate `/proc/stat`, so its alert reflects host activity rather than
 only the panel/core process. Compare it with container cgroup deltas and host
 process samples. Short current samples cannot identify the process responsible
 for an earlier spike. CPU settings and notification thresholds were not changed.
+
+### Local resource history
+
+`mirage-resources.service` samples host, process and Docker cgroup counters every
+15 seconds using the Python standard library. It records the five busiest and
+five largest resident processes (deduplicated), container names, CPU usage and
+throttling, memory usage/limits/OOM events, host available RAM, swap activity,
+major faults, CPU steal/I/O wait, scheduler counts and CPU/memory/I/O pressure.
+Process I/O deltas help correlate work such as an archive or download with a spike.
+Container names refresh every five minutes; unknown containers retain their ID.
+
+History stays on the VPS in `/var/log/mirage-resources/`, directory mode 0700 and
+files 0600. JSONL segments rotate at 4 MiB; retention is bounded by 64 MiB and
+seven-day archive age, whichever removes data sooner. Busy periods can shorten
+the available history. UTC timestamps and actual interval lengths are recorded.
+The collector does not read command arguments, environment variables, application
+databases, traffic, client URLs or tokens. Do not commit diagnostic files.
+
+There are no new Telegram messages, external uploads, scheduled analysis or VPN
+restarts. Only the collector itself restarts on failure. It runs at low CPU/I/O
+priority with a 64 MiB memory ceiling, independently of Compose.
+
+Install only the collector files into the existing root-owned checkout, then:
+
+```bash
+sudo install -m 0644 /opt/mirage/infra/mirage-resources.service /etc/systemd/system/
+sudo systemd-analyze verify /etc/systemd/system/mirage-resources.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now mirage-resources.service
+sudo systemctl status mirage-resources.service --no-pager
+sudo tail -n 1 /var/log/mirage-resources/resources.jsonl
+```
+
+When a spike occurs, keep its time and timezone and inspect the surrounding
+records, including rotated `resources-*.jsonl`. Compare process and cgroup CPU
+deltas with host steal/I/O wait. For memory, distinguish a growing process from
+host pressure and container `memory_events_delta.oom_kill`/`max` increments.
+Resident sizes include shared pages; adding process RSS does not give unique RAM.
+CPU percentages use one logical CPU as 100%; host percentages are normalized
+across the host. The first interval for a newly observed PID has unknown process
+CPU, not a misleading lifetime average.
+
+Short-lived processes can start and exit between samples. A record cannot prove
+an application-level cause or assign every short spike; correlate OOM with the
+kernel journal and application events around the same UTC time:
+
+```bash
+sudo journalctl -k --utc --since '1 hour ago' --grep 'oom-kill|Out of memory|Killed process'
+sudo journalctl -u mirage-resources.service --since '1 hour ago'
+```
+
+To stop collection without affecting VPN, use
+`sudo systemctl disable --now mirage-resources.service`. History is retained until
+explicitly removed; rotation/expiry run only while the collector is active.
