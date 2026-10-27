@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     environment:
       TZ: Europe/Saratov
+      GODEBUG: multipathtcp=0
       XUI_PORT: "12080"
       XUI_DB_TYPE: sqlite
       XUI_BIN_FOLDER: ${XUI_BIN_FOLDER:-/app/bin}
