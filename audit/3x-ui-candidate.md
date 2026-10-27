@@ -355,3 +355,159 @@ The root-only deployment/verification report is
 `/var/lib/mirage-resources-deployment.json`. No historical spike is attributed to
 a process on the basis of these new samples; future analysis must correlate the
 recorded interval with process/cgroup counters and kernel/application events.
+
+## XHTTP idle peers and socket options — 2026-10-26
+
+### Findings
+
+Correlated the 18:33–18:34 Europe/Saratov host-memory alerts with the resource
+history. Xray RSS grew from about 103 to 152 MiB around the event; the panel
+remained in its earlier range. The container used about 245–257 MiB against its
+512 MiB ceiling, with no new OOM or memory-limit event. In the ten minutes before
+the diagnostic session, sampled memory pressure averaged below 0.8% over ten
+seconds; CPU activity briefly reached about 81%, including host steal time.
+The reported video slowdown was not objectively measured or attributed to RAM.
+
+The final pre-change socket sample found 2,297 established connections on XHTTP:
+2,293 idle in both directions for more than five minutes, including 1,308 for more
+than half an hour. The dominant local pprof group contained 2,283 goroutines in
+REALITY reads and `net/http.(*conn).serve`, waiting in `bufio.Reader.Peek` for
+another HTTP request. No TCP keepalive timer was present on those sockets.
+
+Some source addresses matched native online-user records. An address match does
+not authenticate each idle connection or uniquely identify a person behind NAT.
+The owner's Throne uses auto-selection; a causal link to its probes has not been
+reproduced. Stable host consumers included fwupd at roughly 122–137 MiB RSS and
+multipathd at roughly 27 MiB. Neither service nor the unrelated media bot changed.
+
+One initial full-history analysis itself used about 50 MiB temporarily. Its timing
+overlapped the 18:36 alert, so that interval is not used to attribute the original
+event to VPN traffic. Later history reads stream records. A capped text heap
+export was incomplete and is not used for live-allocation attribution; the useful
+evidence is the bounded goroutine profile and selected runtime counters.
+
+### Application and verification
+
+The owner approved applying XHTTP socket timeouts with a short Xray restart and
+rollback if checks failed. The initial full candidate passed native `run -test`,
+and all four Base64/JSON subscription pairs were available. An API response-shape
+correction was required before the first mutation; it did not restart the core.
+
+The first applied configuration used idle=60 seconds, interval=20 seconds and
+`tcpUserTimeout=60000`. A post-restart HTTPS probe failed and triggered the
+prepared rollback. That initial harness did not retain its curl failure code;
+the cause remains unclassified. All 16 user/transport combinations and four
+256 KiB XHTTP payloads then passed on the restored configuration. Subsequent
+application used native inbound hot updates without another forced core restart.
+
+The first isolated dropped-peer rehearsal did not confirm closure within 150
+seconds. The client remained alive, 54 packets were dropped inside its own network
+namespace, and the temporary container/configuration were removed. Kernel socket
+inspection then established that the listener used MPTCP (protocol 262) and did
+not support `TCP_USER_TIMEOUT`; accepted sockets reported zero for that option.
+The saved setting was therefore not accepted as evidence of enforcement.
+
+Replaced that unsupported option with the native Linux custom socket option
+`IPPROTO_TCP/TCP_KEEPCNT=3`, retaining idle=60 and interval=20. The final configuration
+passed native validation, 16 user/transport HTTPS checks and four exact 256 KiB
+XHTTP downloads with no recorded probe retry. All eight subscription bodies,
+native credentials/attachments/settings and protected container identities,
+start times and restart counts were unchanged. The maintenance API token was
+disabled afterwards. The final native hot updates retained the core PID.
+
+The database preserves the final options. Native hot update left the generated
+config file unchanged; actual newly accepted socket options were inspected instead.
+The previous accepted sockets still had their earlier values, so the same 60/20/3
+parameters were applied once to 484 established XHTTP sockets, with no failures,
+forced closes, global sysctl change or additional daemon. No other transport's
+socket options were changed. Post-change core/container recreation was not part
+of this check.
+
+The corrected HTTP/1 idle rehearsal tracked a fresh socket inode, verified empty
+send/receive queues and its actual 60/20/3 options, then blackholed only the
+temporary client's network namespace. The target closed after 120.83 seconds;
+the test client stayed running and the production core PID did not change.
+This established idle-peer cleanup, not a bound on pending application data.
+The HTTP/2 pending-data rehearsal remained open after 300 seconds with the
+MPTCP listener. Temporary test containers and private configurations were removed.
+Reports remain root-only under `/var/lib/mirage-netdiag/20261026-memory/`.
+
+## Ordinary TCP and effective XHTTP user timeout — 2026-10-27
+
+### Correlation of new alerts
+
+Streamed the existing 15-second history rather than loading it into memory.
+Intervals below use Europe/Saratov time; process maxima need not occur in the same
+sample and are not added together.
+
+| Interval | Observation |
+| --- | --- |
+| 03:00–03:06 | Recovery job ran for about 134 seconds and consumed about 86 CPU-seconds. The sampled Python peak was 79% CPU; the interval also included Xray traffic. |
+| 12:06–12:14 | Xray peaked at 73% CPU, softirq worker at 16%, panel at 6%, host steal at 5%. Container CPU peaked at 76%; host available RAM stayed above 281 MiB. |
+| 21:40–21:57 | Xray RSS peaked at 145 MiB, panel at 84 MiB, fwupd at 138 MiB. The VPN cgroup peaked at 251 MiB of 512 MiB; host available RAM fell to 164 MiB and memory `some avg10` pressure reached 12.05%. |
+
+No host OOM delta occurred in these windows. There was no configured container
+CPU quota. The evidence supports host CPU contention during the daytime alerts
+and host memory pressure during the evening interval; it does not establish the
+source or throughput of each user's traffic. fwupd and unrelated services were
+left unchanged. The collector's sampled RSS was about 8 MiB. The original
+application attribution remains incomplete for healthy idle pools.
+
+### Authorized change
+
+An isolated rehearsal with the exact pinned image and managed Xray binary had
+confirmed that `GODEBUG=multipathtcp=0` exposes ordinary TCP and applies the native
+user timeout to listener and accepted sockets. With explicit restart permission,
+changed only the 3x-ui Compose environment and the XHTTP native socket options to
+idle=60 seconds, interval=20 seconds and `tcpUserTimeout=60000` milliseconds.
+Removed the superseded `TCP_KEEPCNT=3` custom option. Images, managed core, mounts,
+512 MiB memory/no-swap policy and other inbound settings were preserved.
+
+Saved a consistent SQLite snapshot and previous Compose/inbound settings for
+rollback. The first attempt rolled back after the guard compared Compose's
+configuration-hash label as immutable; that hash necessarily changes with the
+environment. The corrected comparison excludes only that label, the generated
+hostname and the intended environment variable, and retains all other checks.
+Both attempts and the first rollback are recorded; neither is hidden by the
+successful application report.
+
+The second application completed at 22:03 Europe/Saratov. Kernel inspection of
+the new XHTTP listener confirmed protocol=6, keepalive=1, idle=60, interval=20 and
+`TCP_USER_TIMEOUT=60000`. The regenerated cold-start configuration matched native
+settings. All 16 user/transport HTTPS checks and four exact 256 KiB XHTTP downloads
+passed. All eight raw/JSON subscription bodies were unchanged, as were client
+credentials, attachments, native settings and all other containers. The temporary
+API credential was disabled.
+
+The first post-change HTTP/2 blackhole rehearsal closed both fresh test sockets
+within 85.42 seconds with the client still alive and the production core PID
+unchanged. Accepted sockets had protocol=6 and user timeout=60000. Its 8 MiB
+response had already been acknowledged before packet loss; the send queues stayed
+empty. The report deliberately marks the pending-data requirement unconfirmed.
+This result alone is evidence for idle-peer cleanup, not retransmission timeout.
+
+A second, deterministic rehearsal first established an authenticated REALITY
+HTTP/1 keepalive session on the same production XHTTP listener. It then suppressed
+pure TCP ACKs only in that temporary client's namespace, sent another request,
+and verified 104 bytes of unacknowledged response data on the fresh server socket
+before blackholing the test namespace. The socket closed after 60.16 seconds;
+the client remained running without OOM and the production core PID was unchanged.
+Actual accepted options included protocol=6 and user timeout=60000. This verifies
+the kernel retransmission timeout on that listener; the fixture is HTTP/1 and
+is not claimed as a duplicate of the earlier HTTP/2 pending-data sequence.
+Both temporary containers and private test configurations were removed.
+
+The lasting application-level result still requires normal traffic evidence.
+The initial restart reclaimed existing sockets; the resulting RAM decrease does
+not prove that healthy idle pools are bounded. No automatic VPN restart, extra
+notification, global TCP sysctl or unrelated-service change was added. Resource
+history remains capped at 64 MiB; at the post-change check it occupied about
+41 MiB, diagnostic files about 3 MiB, and the root filesystem had about 26 GiB
+available. The collector and existing retention settings remain active.
+
+The final 22:08 Europe/Saratov check found the panel healthy, the same post-change
+core PID, 12 established XHTTP sockets and about 90 MiB charged to 3x-ui. Its new
+cgroup recorded no OOM/limit events or CPU throttling. These are immediate
+post-restart observations, not a long-term memory-growth measurement. Other
+container identities/start times/configuration fingerprints were unchanged, and
+`mirage-resources.service` remained active.

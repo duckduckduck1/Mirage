@@ -2,7 +2,8 @@
 
 [README](../README.md) · [Setup](setup.md) · [Recovery](recovery.md) · [Migration](migration.md)
 
-**Status: 3x-ui production switch completed on 2026-10-25.** Marzban is stopped.
+**Status: 3x-ui production switch completed on 2026-10-25.** Legacy Marzban
+and staging resources were removed on 2026-10-26.
 Remaining acceptance checks are recorded in the [deployment review](../audit/3x-ui-candidate.md).
 
 ## Telegram administration
@@ -255,6 +256,69 @@ The limit can be increased on the running container with `docker update`, withou
 restarting Xray; keep the private environment and Compose configuration consistent.
 Do not disable the OOM killer or add automatic VPN restarts to hide memory pressure.
 
+### XHTTP connection cleanup
+
+The 2026-10-26 investigation found about 2,300 established XHTTP sockets; almost
+all were idle in both directions for more than five minutes. A local goroutine
+profile showed the dominant group waiting for the next HTTP request. This is
+distinct from hitting the container's 512 MiB ceiling: no new OOM or limit event
+was recorded during the original memory alerts.
+
+The production XHTTP inbound on port 2053 uses these native stream socket options:
+
+```json
+{
+  "sockopt": {
+    "tcpKeepAliveIdle": 60,
+    "tcpKeepAliveInterval": 20,
+    "tcpUserTimeout": 60000
+  }
+}
+```
+
+Idle and interval are seconds; `tcpUserTimeout` is milliseconds. Set these through
+native 3x-ui inbound configuration, preserving unrelated options. See the
+[official socket documentation](https://xtls.github.io/config/transports/sockopt.html).
+These options apply to XHTTP. Credentials, subscription URLs, ports and the other
+inbound settings are unchanged. Global TCP sysctls are unchanged.
+
+Compose sets `GODEBUG=multipathtcp=0` on 3x-ui and its child Xray process. On the
+pinned runtime, the previous listener used MPTCP and did not support
+`TCP_USER_TIMEOUT`; accepted TCP sockets reported zero despite the saved setting.
+The 2026-10-27 container recreation switched to ordinary TCP. Kernel inspection
+confirmed protocol 6, keepalive enabled, idle=60, interval=20 and user timeout=60000
+on the new XHTTP listener. Configuration validation alone cannot establish that a
+socket option took effect: verify both listener and accepted sockets.
+
+The earlier `TCP_KEEPCNT=3` workaround was removed. Its isolated HTTP/1 idle-peer
+test closed the dead connection after 120.83 seconds, but an HTTP/2 test with
+outstanding data remained connected after five minutes. TCP keepalive alone did
+not cover that retransmission case. The ordinary-TCP test results are recorded
+in the [deployment review](../audit/3x-ui-candidate.md).
+
+These timeouts reclaim unresponsive TCP peers. They do not impose an HTTP idle
+timeout on clients that continue acknowledging probes. The reviewed
+[XHTTP listener](https://github.com/XTLS/Xray-core/blob/v26.7.28/transport/internet/splithttp/hub.go)
+does not configure `http.Server.IdleTimeout`; a durable bound on healthy idle
+HTTP pools has not been established. Auto-selection checks are a hypothesis for
+client activity, not proof of which device caused accumulation.
+
+Native inbound updates can apply through the core API without restarting the
+process. During the earlier hot update, the generated `config.json` remained
+unchanged while the native database retained the new options. Check saved
+settings and newly accepted sockets instead of treating that file as the sole
+runtime authority. A normal panel/core start regenerates it from native settings;
+the 2026-10-27 cold-start file contained the intended options. Do not patch only
+the generated file. Already accepted connections retain their earlier options
+after a hot update.
+
+Recreation clears the existing connection population. The immediate reduction
+in socket count or memory does not establish a lasting fix. Recheck counts,
+goroutines and memory under real traffic; keep automatic VPN restarts disabled.
+Local VPS traffic tests do not establish throughput or reliability on a particular
+ISP. The 512 MiB container ceiling also does not reserve RAM on the one-GiB host:
+compare host `MemAvailable` and memory pressure with container usage.
+
 ### CPU alerts
 
 The one-vCPU host has no Docker CPU quota for 3x-ui: `cpu.max` is `max 100000`,
@@ -306,6 +370,11 @@ Resident sizes include shared pages; adding process RSS does not give unique RAM
 CPU percentages use one logical CPU as 100%; host percentages are normalized
 across the host. The first interval for a newly observed PID has unknown process
 CPU, not a misleading lifetime average.
+
+Read JSONL files as a stream with a bounded summary. Loading the complete decoded
+history into a list can itself consume significant RAM on this VPS. Filter local
+debug endpoints to the required counters; avoid unbounded text heap exports.
+The history file budget does not limit memory used by an ad hoc analysis process.
 
 Short-lived processes can start and exit between samples. A record cannot prove
 an application-level cause or assign every short spike; correlate OOM with the

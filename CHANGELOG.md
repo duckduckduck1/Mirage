@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-10-27 — Effective XHTTP TCP timeout
+
+- Set `GODEBUG=multipathtcp=0` for 3x-ui and its child core so the pinned runtime
+  uses ordinary TCP and actually applies XHTTP `tcpUserTimeout=60000`.
+- Preserved pinned images, data, user credentials, subscription bodies and the
+  other containers; rechecked 16 HTTPS combinations and four XHTTP payloads.
+- Verified closure of an isolated socket with unacknowledged response data after
+  60.16 seconds, without restarting the production core during the test.
+- Correlated the new CPU/memory alerts with bounded local history and documented
+  host pressure separately from the container ceiling, including the first
+  application rollback and the limits of isolated tests.
+
+## 2026-10-26 — XHTTP peer timeouts
+
+- Investigated accumulated idle XHTTP/REALITY sockets and the corresponding Xray
+  goroutines during host-memory alerts; found no new container OOM or limit event.
+- Applied native keepalive options only to XHTTP. Preserved all four
+  users, transports, subscription bodies, bot settings and production containers.
+- Rechecked 16 user/transport HTTPS combinations and four 256 KiB XHTTP payloads.
+  Documented the initial rollback, native hot update and the remaining distinction
+  between unreachable peers and healthy idle HTTP connections.
+
 ## 2026-10-26 — Local resource diagnosis
 
 - Added a low-priority, standard-library sampler for host/process/container CPU,
