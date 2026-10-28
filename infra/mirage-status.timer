@@ -1,0 +1,10 @@
+[Unit]
+Description=Mirage server status at 03:00 Saratov time
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 Europe/Saratov
+Persistent=true
+Unit=mirage-status.service
+
+[Install]
+WantedBy=timers.target

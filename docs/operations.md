@@ -25,9 +25,32 @@ on probe failure disabled: a transient external failure must not restart all
 connections. Health checks measure the panel listener, not end-to-end VPN traffic;
 unhealthy status alone does not trigger Docker's restart policy.
 
-A complete VPS outage also disables its bot. Missing daily recovery delivery is
-a warning, not independent availability monitoring. Immediate host-down detection
-requires an external monitor.
+### Nightly server status
+
+At **03:00 Europe/Saratov**, [mirage-status.timer](../infra/mirage-status.timer)
+runs a small [host check](../infra/status.py) and sends one message to the same
+private administrator chat. It checks the two container states, the Xray process,
+the local panel, the subscription TLS certificate and four listening TCP ports.
+It includes available host RAM. A failed check sends a warning instead of a
+success message; a failed Telegram send is recorded as a delivery failure.
+
+This does not exercise authenticated profiles or demonstrate reachability from a
+client ISP. The native weekly report remains unchanged. No extra bot, continuous
+monitor, traffic logging or VPN restart is involved. The native Telegram report
+schedule is registered at panel startup, so changing it alone cannot activate a
+new schedule without restarting the panel in this version.
+
+```bash
+sudo install -m 644 infra/mirage-status.service infra/mirage-status.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now mirage-status.timer
+sudo systemctl start mirage-status.service
+```
+
+The status service is capped at 30% of one CPU and 64 MiB; it has no automatic
+retry. A complete VPS outage also prevents its message. Missing nightly status
+is a reason to check, not independent proof of VPN failure. Immediate host-down
+detection requires an external monitor.
 
 ## Secret management
 
@@ -162,40 +185,61 @@ Automatic restarts are not a fallback for a failed renewal test.
 
 ## Encrypted backups
 
-`infra/backup.py` takes a consistent SQLite backup, checks integrity and encrypts
+**Automatic backups are disabled by owner choice.** The old
+`mirage-backup.timer` is disabled and inactive. Existing encrypted archives and
+keys are retained; the manual backup service remains available.
+
+`infra/backup.py` takes a consistent SQLite snapshot, checks integrity and encrypts
 with age before delivery. Plaintext native bot backups remain disabled. The task
 checks running image identities/data mounts and records the actual core version.
-TLS publication is locked during its snapshot; ACME changes during archiving
-invalidate the snapshot for retry.
+It retains the managed core and geodata needed for offline restoration.
 
-Configure a valid age public recipient in the private host JSON. Verify initial
-image/recovery delivery and downloaded restoration before enabling the timer:
+Compression uses **gzip level 1**. Transient files and directories are filtered
+before stat/open; panel metric history is copied from one open inode before
+archiving, preserving a published snapshot during upstream atomic replacement.
+TLS publication is locked during its snapshot. Changes to non-transient ACME
+state invalidate the snapshot; temporary-file churn alone does not.
+
+The manual unit has `CPUQuota=30%` and `CPUWeight=20`. It has no automatic restart
+or retry. A CPU quota limits the job's CPU time, not total host load; other traffic
+can still saturate this one-vCPU VPS. Lower compression can enlarge the archive;
+measure actual duration/size rather than assuming a fixed saving.
+
+Configure a valid age public recipient in the private host JSON. Install/update
+the service and deliberately keep scheduling off:
 
 ```bash
-sudo python3 /opt/mirage/infra/backup.py --config /etc/mirage/host.json --include-images
-sudo install -m 644 infra/mirage-backup.service infra/mirage-backup.timer /etc/systemd/system/
+sudo install -m 644 infra/mirage-backup.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now mirage-backup.timer
-sudo systemctl list-timers mirage-backup.timer
+sudo systemctl disable --now mirage-backup.timer
+sudo systemctl start mirage-backup.service
+sudo journalctl -u mirage-backup.service --since '10 minutes ago'
 ```
 
-Schedule: **03:00 Europe/Saratov**, persistent missed-run handling, 15-minute
-failure retries. A completed daily run is not duplicated. `--include-images`
-forces a pre-change bundle even on the same day. `--prepare-only` encrypts and
-queues without contacting Telegram; it does not establish delivery.
+The service uses `--force` to create a fresh recovery copy even if one was already
+delivered that day. Matching image bundles are reused. Running the helper directly
+with Python bypasses the unit's CPU controls. Running it directly
+without `--force` skips an already completed same-day copy. `--include-images`
+also exports the images again; reserve it for a deliberate image archive.
+`--prepare-only` encrypts and queues without contacting Telegram and does not prove
+delivery. A manual attempt resumes pending delivery before creating another copy.
 
-Parts are at most 18 MiB with SHA256 hashes. A final manifest confirms complete
-delivery. Retries skip acknowledged parts; acknowledgement-boundary failures may
-produce identifiable duplicates. Pending delivery runs before new snapshots.
-Image bundles are sent initially and when image IDs change; each recovery manifest
-references its matching image bundle. Retain all referenced bundles in Telegram
-and an independent downloaded initial set.
+Stage logs contain UTC timestamps, elapsed time and fixed stage names. Failures
+record exception/cause types and numeric errno/return codes when available, without
+exception text, file paths, arguments, tokens or response bodies. Stages distinguish
+snapshot, archive, encryption, splitting and delivery. The exact first-failure
+cause on 2026-10-28 cannot be recovered from the earlier generic log.
 
-Only delivered daily recovery copies older than seven days are pruned locally.
-Queued parts and image bundles are not automatically removed. A power loss may
-leave private `.snapshot-*`, `.images-*` or `.queue-*` directories; remove only
-confirmed abandoned task directories. A full disk fails the task and triggers
-retry. Retire obsolete image sets only after checking retained snapshots.
+The existing delivery format remains: parts at most 18 MiB, SHA256 hashes and a
+final manifest. A recovery copy also references a separate image bundle. This is
+why one backup produces several Telegram documents; disabling automatic backups
+stops those routine deliveries. Retries of a manual command skip acknowledged
+parts, though acknowledgement-boundary failures can produce identifiable duplicates.
+
+Only delivered recovery copies older than seven days are pruned locally, during
+a manual run. Queued parts and image bundles are retained. A power loss may leave
+private `.snapshot-*`, `.images-*` or `.queue-*` directories; remove only confirmed
+abandoned task directories. Existing archives are not removed by disabling the timer.
 
 ## Updates and failures
 

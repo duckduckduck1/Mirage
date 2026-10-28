@@ -19,6 +19,7 @@ import backup
 import host
 import provision
 import tls
+import status
 
 
 def fixture_token():
@@ -120,6 +121,56 @@ class ConfigurationTests(PrivateFixture):
 
 
 class SnapshotTests(PrivateFixture):
+    def test_failure_log_keeps_stage_type_and_errno_without_private_values(self):
+        output, errors = io.StringIO(), io.StringIO()
+        with mock.patch.object(backup.sys, "stdout", output), mock.patch.object(backup.sys, "stderr", errors):
+            backup.progress("archive.runtime-state")
+            try:
+                try:
+                    raise FileNotFoundError(2, fixture_token(), "/private/" + fixture_token())
+                except OSError:
+                    raise host.SafeError(fixture_token()) from None
+            except host.SafeError as error:
+                backup.log_failure(error)
+        record = json.loads(errors.getvalue())
+        self.assertEqual(record["stage"], "archive.runtime-state")
+        self.assertEqual(record["error_type"], "SafeError")
+        self.assertEqual(record["cause_type"], "FileNotFoundError")
+        self.assertEqual(record["errno"], 2)
+        self.assertNotIn(fixture_token(), output.getvalue() + errors.getvalue())
+        self.assertNotIn("/private/", errors.getvalue())
+
+    def test_forced_manual_snapshot_reuses_matching_images(self):
+        root = self.state / "backups"
+        root.mkdir(mode=0o700)
+        host.write_json(root / "last-success.json", {
+            "date": backup.dt.datetime.now(backup.ZoneInfo("Europe/Saratov")).date().isoformat()})
+        host.write_json(root / "images.json", {"bundle": "existing-images", "image_ids": ["fixture-image"]})
+        self.config["age_recipient"] = "age1" + "a" * 58
+        with mock.patch.object(backup, "drain"), mock.patch.object(backup, "prune_delivered_recovery"), \
+                mock.patch.object(backup, "image_inventory", return_value=([{"id": "fixture-image"}], "Xray fixture")) as inventory, \
+                mock.patch.object(backup, "build_recovery", return_value=self.root / "snapshot") as build, \
+                mock.patch.object(backup, "queue_archive", return_value="recovery"), \
+                mock.patch.object(backup, "run") as external:
+            backup.backup(self.config)
+            inventory.assert_not_called()
+            backup.backup(self.config, force=True)
+        self.assertEqual(build.call_args.args[4], "existing-images")
+        external.assert_not_called()
+
+    def test_transient_paths_are_skipped_before_stat_and_symlink_resolution(self):
+        source = self.root / "source"
+        source.mkdir()
+        (source / "kept").write_text("fixture")
+        (source / "disappeared.tmp").symlink_to(self.root / "absent")
+        transient = source / ".queue-fixture"
+        transient.mkdir()
+        (transient / "private").write_text(fixture_token())
+        with tarfile.open(self.root / "transient.tar", "w") as archive:
+            backup.add_tree(archive, source, "state")
+        with tarfile.open(self.root / "transient.tar") as archive:
+            self.assertEqual(archive.getnames(), ["state", "state/kept"])
+
     def test_image_identity_uses_actual_digest_not_normalized_reference_text(self):
         environment = host.read_env(self.config)
         digest = environment["XUI_IMAGE"].split("@", 1)[1]
@@ -207,6 +258,9 @@ class SnapshotTests(PrivateFixture):
         with sqlite3.connect(database_dir / "x-ui.db") as database:
             database.execute("CREATE TABLE users (name TEXT)")
             database.execute("INSERT INTO users VALUES ('fixture')")
+        metrics = database_dir / "system_metrics.gob"
+        metrics.write_bytes(b"original published metric snapshot")
+        (database_dir / "system_metrics.gob.tmp").symlink_to(self.root / "absent")
         certificate_root = self.state / "tls"
         certificate_root.mkdir(mode=0o700)
         (certificate_root / "fixture").write_text("fixture TLS state")
@@ -217,12 +271,26 @@ class SnapshotTests(PrivateFixture):
         acme = Path(self.config["acme_dir"])
         acme.mkdir(mode=0o700)
         (acme / "account.conf").write_text("fixture ACME account")
+        (acme / "account.conf.tmp").symlink_to(self.root / "absent")
         work = self.root / "work"
         work.mkdir(mode=0o700)
         cron = ('0 0 * * * /unrelated/private-job\n0 1 * * * "' + str(acme)
                 + '"/acme.sh --cron --home "' + str(acme) + '"\n').encode()
-        with mock.patch.object(backup, "run", return_value=cron):
+        original_copy = backup.shutil.copyfileobj
+        original_open = backup.tarfile.open
+
+        def publish_new_metrics(live, destination, **kwargs):
+            replacement = database_dir / "replacement.tmp"
+            replacement.write_bytes(b"newer smaller snapshot")
+            os.replace(replacement, metrics)
+            (acme / "changed.tmp").write_text("transient ACME state")
+            return original_copy(live, destination, **kwargs)
+
+        with mock.patch.object(backup, "run", return_value=cron), \
+                mock.patch.object(backup.shutil, "copyfileobj", side_effect=publish_new_metrics), \
+                mock.patch.object(backup.tarfile, "open", wraps=original_open) as opened:
             path = backup.build_recovery(self.config, host.read_env(self.config), [], "Xray fixture", "image-fixture", work)
+        self.assertEqual(opened.call_args.kwargs["compresslevel"], 1)
         with tarfile.open(path, "r:gz") as archive:
             self.assertIn("deployment/infra/provision.py", archive.getnames())
             self.assertEqual(archive.getmember("state/db/bin/xray-linux-amd64").mode, 0o700)
@@ -230,6 +298,9 @@ class SnapshotTests(PrivateFixture):
             self.assertIn("RECOVERY.md", archive.getnames())
             self.assertIn("state/tls-source/fixture", archive.getnames())
             self.assertIn("deployment/panel-access.json", archive.getnames())
+            self.assertEqual(archive.extractfile("state/db/system_metrics.gob").read(),
+                             b"original published metric snapshot")
+            self.assertFalse(any(name.endswith(".tmp") for name in archive.getnames()))
             metadata = json.load(archive.extractfile("manifest.json"))
             self.assertEqual(metadata["image_bundle"], "image-fixture")
             cron_snapshot = archive.extractfile("host/acme-cron.txt").read()
@@ -238,6 +309,19 @@ class SnapshotTests(PrivateFixture):
             restored.write_bytes(archive.extractfile("state/db/x-ui.db").read())
         with sqlite3.connect(restored) as database:
             self.assertEqual(database.execute("SELECT name FROM users").fetchone(), ("fixture",))
+
+        changed_work = self.root / "changed-work"
+        changed_work.mkdir(mode=0o700)
+
+        def change_account(live, destination, **kwargs):
+            (acme / "account.conf").write_text("a genuinely changed ACME account")
+            return original_copy(live, destination, **kwargs)
+
+        with mock.patch.object(backup, "run", return_value=cron), \
+                mock.patch.object(backup.shutil, "copyfileobj", side_effect=change_account):
+            with self.assertRaisesRegex(host.SafeError, "ACME state changed"):
+                backup.build_recovery(self.config, host.read_env(self.config), [],
+                                      "Xray fixture", "image-fixture", changed_work)
 
     def test_retention_only_removes_old_delivered_recovery(self):
         sent = self.state / "sent"
@@ -384,6 +468,30 @@ class NativeProvisionTests(PrivateFixture):
         self.assertTrue(settings["twoFactorEnable"])
         self.assertFalse(settings["tgBotBackup"])
         self.assertEqual(sent[-1], ("apiTokens/setEnabled/7", {"enabled": False, "expectedScope": "admin"}))
+
+
+class StatusTests(PrivateFixture):
+    def test_failed_server_check_sends_warning_without_private_error_text(self):
+        output = io.StringIO()
+        with mock.patch.object(sys, "argv", ["status.py", "--config", str(self.config_path)]), \
+                mock.patch.object(status, "check", side_effect=OSError(fixture_token())), \
+                mock.patch.object(status, "notify") as send, \
+                mock.patch.object(sys, "stdout", output):
+            self.assertEqual(status.main(), 0)
+        self.assertFalse(json.loads(output.getvalue())["healthy"])
+        self.assertIn("не завершилась", send.call_args.args[1])
+        self.assertNotIn(fixture_token(), output.getvalue() + send.call_args.args[1])
+
+    def test_failed_telegram_send_is_not_reported_as_delivered(self):
+        output, errors = io.StringIO(), io.StringIO()
+        with mock.patch.object(sys, "argv", ["status.py", "--config", str(self.config_path)]), \
+                mock.patch.object(status, "check", return_value=({"healthy": True}, "fixture status")), \
+                mock.patch.object(status, "notify", side_effect=host.SafeError(fixture_token())), \
+                mock.patch.object(sys, "stdout", output), mock.patch.object(sys, "stderr", errors):
+            self.assertEqual(status.main(), 1)
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(json.loads(errors.getvalue())["event"], "nightly_status_failed")
+        self.assertNotIn(fixture_token(), errors.getvalue())
 
 
 if __name__ == "__main__":

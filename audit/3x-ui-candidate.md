@@ -511,3 +511,59 @@ cgroup recorded no OOM/limit events or CPU throttling. These are immediate
 post-restart observations, not a long-term memory-growth measurement. Other
 container identities/start times/configuration fingerprints were unchanged, and
 `mirage-resources.service` remained active.
+
+## Manual backup acceptance and nightly status — 2026-10-28
+
+The owner authorized backup changes and a delivery test without restarting the
+VPN, then explicitly chose to disable automatic backups. The first 03:00 attempt
+that night had failed with a generic Python exception; its exact cause remains
+unproven. The 03:17 retry succeeded. Neither attempt was an OOM or the two-hour
+unit timeout. Review found that daily gzip level 9 repeatedly compressed about
+173 MiB of managed core/geodata while the unit had no CPU quota.
+
+Changed the helper to gzip level 1 and fixed stage names with UTC/elapsed timing.
+Error records expose only exception/cause type and numeric errno/return codes
+when available. They do not print error text, arguments, paths, response bodies
+or credentials. Transient names are filtered before stat/open, including whole
+temporary trees. The panel's atomically published metric file is copied through
+one open inode before archiving. ACME validation ignores transient-file churn
+but continues to reject actual account/configuration changes. Tests exercise
+both cases, disappearing temporary symlinks, SQLite contents and private-log
+redaction. These fixes address identified races without assigning an unrecorded
+exception to one of them.
+
+The manual unit uses `--force`, `CPUQuota=30%`, `CPUWeight=20` and `Restart=no`.
+It reuses matching image bundles. `mirage-backup.timer` is disabled and inactive;
+native plaintext bot backups remain disabled. Existing recovery material was
+retained. Manual attempts still preserve resumable encrypted delivery.
+
+One fresh recovery copy completed at 13:46 Europe/Saratov. Total logged runtime
+was 58.431 seconds, with runtime-state archiving taking about 22 seconds. Three
+available 15-second process samples showed CPU 29.24%, 19.72% and 5.00%, and
+RSS about 18–23 MiB. These are sampled observations, not a measured instantaneous
+maximum or a controlled same-load benchmark against the night run. The encrypted
+copy was 58,480,210 bytes in four parts plus its manifest; all part checksums
+matched and Telegram acknowledged delivery, including a stored manifest receipt.
+The pre-existing image bundle was reused. No downloaded restore rehearsal was
+performed for this test copy. A final logging-only refinement names the ACME
+baseline stage separately; no second large delivery was needed.
+
+Added a short-lived standard-library host check and systemd timer for one status
+message at 03:00 Europe/Saratov. Native Telegram report scheduling in this version
+is registered at panel startup; the separate job avoids a panel/VPN restart. The
+existing native weekly report and alert settings remain unchanged. The host check
+uses the same private token/recipient through the existing sender and does not
+poll for updates. It checks x-ui/Caddy states, the production Xray process, local
+panel HTTP, verified subscription TLS and four TCP listeners, plus available RAM.
+It sends a warning on failed/incomplete checks. It has a 30% CPU quota, 64 MiB cap
+and no automatic restart/retry. It neither probes authenticated VPN traffic nor
+establishes reachability from Russian client networks. A complete host outage
+also prevents its own status message.
+
+The test status was delivered with all server checks passing. The timer is
+enabled/active; its first scheduled run is 2026-10-29 03:00 Europe/Saratov. Both
+one-shot jobs finished successfully. Final comparison preserved all five Docker
+container identities/start times/configuration fingerprints/images, the production
+core PID, client records, assignments and native settings. No VPN, panel, bot or
+Caddy restart was requested. The safe verification report is root-only at
+`/var/lib/mirage-backup-update-20261028/verification.json`.
