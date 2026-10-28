@@ -11,6 +11,7 @@ import re
 import shlex
 import shutil
 import sqlite3
+import stat
 import sys
 import tarfile
 import tempfile
@@ -23,6 +24,51 @@ from host import (SafeError, compose, load_config, private_dir, read_env, run,
                   send_document, sha256, telegram_settings, write_json)
 
 PART_SIZE = 18 * 1024 * 1024
+STARTED = time.monotonic()
+CURRENT_STAGE = "startup"
+
+
+def progress(stage):
+    """Log fixed stage names only; never file paths, arguments or data."""
+    global CURRENT_STAGE
+    CURRENT_STAGE = stage
+    print(json.dumps({"event": "backup_stage", "stage": stage,
+                      "time_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+                      "elapsed_seconds": round(time.monotonic() - STARTED, 3)}), flush=True)
+
+
+def log_failure(error):
+    record = {"event": "backup_failed", "stage": CURRENT_STAGE,
+              "error_type": type(error).__name__,
+              "time_utc": dt.datetime.now(dt.timezone.utc).isoformat()}
+    cause = error
+    for _ in range(4):
+        nested = cause.__cause__ or cause.__context__
+        if nested is None or nested is cause:
+            break
+        cause = nested
+    record["cause_type"] = type(cause).__name__
+    for field in ("errno", "returncode"):
+        value = getattr(cause, field, None)
+        if isinstance(value, int):
+            record[field] = value
+    print(json.dumps(record), file=sys.stderr, flush=True)
+
+
+def temporary_name(name):
+    return (name.endswith((".tmp", ".temp", ".swp", ".swo", ".new", "~"))
+            or name.startswith((".snapshot-", ".images-", ".queue-"))
+            or name in {"publish.lock", "backup.lock"})
+
+
+def source_paths(path):
+    """Exclude transient names before stat/open, including entire temp trees."""
+    if temporary_name(path.name):
+        return
+    yield path
+    if path.is_dir() and not path.is_symlink():
+        for child in sorted(path.iterdir()):
+            yield from source_paths(child)
 
 
 def snapshot_database(source, destination):
@@ -45,6 +91,8 @@ def snapshot_database(source, destination):
 def add_tree(archive, source, name):
     """Archive regular files and contained symlinks only, never devices or sockets."""
     source = Path(source)
+    if temporary_name(source.name):
+        return
     root = source.resolve() if source.is_dir() else source.parent.resolve()
 
     def checked(info):
@@ -62,7 +110,10 @@ def add_tree(archive, source, name):
         info.mode = 0o700 if info.isdir() or executable else 0o600
         return info
 
-    archive.add(source, arcname=name, recursive=True, filter=checked)
+    for entry in source_paths(source):
+        relative = entry.relative_to(source)
+        member = name if relative == Path(".") else str(Path(name) / relative)
+        archive.add(entry, arcname=member, recursive=False, filter=checked)
 
 
 def image_inventory(config, environment):
@@ -116,10 +167,20 @@ def build_recovery(config, environment, images, core, image_bundle, work):
     acme_root = Path(config["acme_dir"])
 
     def acme_stamp():
-        return {str(path.relative_to(acme_root)): (path.lstat().st_mtime_ns, path.lstat().st_size, path.lstat().st_ino)
-                for path in [acme_root, *acme_root.rglob("*")]}
+        result = {}
+        for path in source_paths(acme_root):
+            info = path.lstat()
+            # Transient children also change directory mtimes. The path map
+            # detects real additions/removals without treating those as renewal.
+            stamp = (info.st_ino, info.st_mode)
+            if not stat.S_ISDIR(info.st_mode):
+                stamp += (info.st_mtime_ns, info.st_size)
+            result[str(path.relative_to(acme_root))] = stamp
+        return result
 
+    progress("snapshot.acme-baseline")
     before = acme_stamp()
+    progress("snapshot.database")
     snapshot = work / "x-ui.db"
     snapshot_database(state / "db" / "x-ui.db", snapshot)
     manifest = {"format": 1, "created_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -127,26 +188,47 @@ def build_recovery(config, environment, images, core, image_bundle, work):
                 "database_sha256": sha256(snapshot),
                 "restore_note": "Restore matching images and private paths; keep bots, ACME and DNS jobs disabled in clones."}
     archive_path = work / "recovery.tar.gz"
-    with tarfile.open(archive_path, "w:gz", dereference=False) as archive:
+    progress("archive.database")
+    with tarfile.open(archive_path, "w:gz", compresslevel=1, dereference=False) as archive:
         payload = json.dumps(manifest, indent=2).encode()
         info = tarfile.TarInfo("manifest.json")
         info.size, info.mode = len(payload), 0o600
         archive.addfile(info, io.BytesIO(payload))
         add_tree(archive, snapshot, "state/db/x-ui.db")
+        progress("archive.runtime-state")
         for extra in sorted((state / "db").iterdir()):
-            if extra.name not in {"x-ui.db", "x-ui.db-wal", "x-ui.db-shm", "x-ui.db-journal"}:
+            if (temporary_name(extra.name)
+                    or extra.name in {"x-ui.db", "x-ui.db-wal", "x-ui.db-shm", "x-ui.db-journal"}):
+                continue
+            if extra.name == "system_metrics.gob":
+                # Upstream publishes this file by atomic rename. Read one pinned
+                # inode, then archive its stable copy, avoiding a stat/open race.
+                progress("snapshot.panel-metrics")
+                stable = work / "system_metrics.gob"
+                with os.fdopen(os.open(extra, os.O_RDONLY | os.O_NOFOLLOW), "rb") as live:
+                    if not stat.S_ISREG(os.fstat(live.fileno()).st_mode):
+                        raise SafeError("Panel metric history must be a regular file.")
+                    with stable.open("xb") as target:
+                        os.chmod(stable, 0o600)
+                        shutil.copyfileobj(live, target, length=1024 * 1024)
+                add_tree(archive, stable, "state/db/" + extra.name)
+            else:
                 add_tree(archive, extra, "state/db/" + extra.name)
+        progress("archive.certificates")
         with (state / "tls" / "publish.lock").open("a") as lock:
             os.chmod(lock.name, 0o600)
             fcntl.flock(lock, fcntl.LOCK_SH)
             add_tree(archive, state / "tls", "state/tls")
         if (state / "tls-source").exists():
             add_tree(archive, state / "tls-source", "state/tls-source")
+        progress("archive.acme")
         add_tree(archive, acme_root, "acme")
+        progress("archive.deployment")
         project = Path(config["project_dir"])
         add_tree(archive, project / "compose.yaml", "deployment/compose.yaml")
         for filename in ("Caddyfile", "host.py", "backup.py", "tls.py", "provision.py",
-                         "restore-isolated.yaml", "mirage-backup.service", "mirage-backup.timer"):
+                         "status.py", "restore-isolated.yaml", "mirage-backup.service",
+                         "mirage-backup.timer", "mirage-status.service", "mirage-status.timer"):
             add_tree(archive, project / "infra" / filename, "deployment/infra/" + filename)
         add_tree(archive, project / "docs" / "recovery.md", "RECOVERY.md")
         add_tree(archive, config["env_file"], "deployment/compose.env")
@@ -171,6 +253,7 @@ def build_recovery(config, environment, images, core, image_bundle, work):
         info = tarfile.TarInfo("host/acme-cron.txt")
         info.size, info.mode = len(payload), 0o600
         archive.addfile(info, io.BytesIO(payload))
+    progress("snapshot.validate-acme")
     if acme_stamp() != before:
         raise SafeError("ACME state changed during the snapshot; retry after renewal completes.")
     return archive_path
@@ -181,7 +264,9 @@ def queue_archive(config, source, outbox, kind, image_ids=None):
     directory = Path(tempfile.mkdtemp(prefix=".queue-", dir=outbox.parent))
     encrypted = directory / "bundle.age"
     try:
+        progress("encrypt." + kind)
         run(["age", "-r", config["age_recipient"], "-o", str(encrypted), str(source)], timeout=3600)
+        progress("split." + kind)
         parts = []
         with encrypted.open("rb") as stream:
             number = 0
@@ -205,6 +290,7 @@ def queue_archive(config, source, outbox, kind, image_ids=None):
 
 
 def deliver(config, directory):
+    progress("delivery.verify")
     metadata_path = directory / "delivery.json"
     metadata = json.loads(metadata_path.read_text())
     for index, part in enumerate(metadata["parts"], 1):
@@ -214,11 +300,13 @@ def deliver(config, directory):
         if not part["sent"]:
             caption = (f"Mirage {metadata['kind']} {metadata['id']} "
                        f"part {index}/{len(metadata['parts'])}; SHA256 {part['sha256']}")
+            progress("delivery.part")
             part["message_id"] = send_document(config, path, caption)
             part["sent"] = True
             write_json(metadata_path, metadata)
     public = directory / "manifest.json"
     write_json(public, {k: v for k, v in metadata.items() if k != "date"})
+    progress("delivery.manifest")
     send_document(config, public, f"Mirage {metadata['kind']} complete: {metadata['id']}. Keep every part and this manifest.")
     return metadata
 
@@ -252,13 +340,15 @@ def prune_delivered_recovery(backup_root):
             shutil.rmtree(directory)
 
 
-def backup(config, *, include_images=False, prepare_only=False):
+def backup(config, *, include_images=False, prepare_only=False, force=False):
+    progress("validate")
     telegram_settings(config)
     if not re.fullmatch(r"age1[0-9a-z]{58}", config["age_recipient"]):
         raise SafeError("Configure an age public recipient, never an identity/private key.")
     environment = read_env(config)
     root = private_dir(Path(config["state_dir"]) / "backups")
     outbox = private_dir(root / "outbox")
+    progress("lock")
     with (root / "backup.lock").open("a") as lock:
         os.chmod(lock.name, 0o600)
         try:
@@ -266,14 +356,18 @@ def backup(config, *, include_images=False, prepare_only=False):
         except BlockingIOError:
             raise SafeError("Another recovery job is already running.") from None
         if not prepare_only:
+            progress("delivery.pending")
             drain(config, root)
+            progress("retention")
             prune_delivered_recovery(root)
         elif any(outbox.iterdir()):
             raise SafeError("Deliver or preserve the existing queue before preparing another bundle.")
         today = dt.datetime.now(ZoneInfo("Europe/Saratov")).date().isoformat()
         success = root / "last-success.json"
-        if not include_images and success.exists() and json.loads(success.read_text())["date"] == today:
+        if not force and not include_images and success.exists() and json.loads(success.read_text())["date"] == today:
+            progress("skip.already-delivered")
             return
+        progress("inventory.images")
         images, core = image_inventory(config, environment)
         identifiers = [record["id"] for record in images]
         image_index = root / "images.json"
@@ -285,6 +379,7 @@ def backup(config, *, include_images=False, prepare_only=False):
             with tempfile.TemporaryDirectory(prefix=".images-", dir=root) as temporary:
                 work = Path(temporary)
                 source = work / "images.tar"
+                progress("export.images")
                 with source.open("wb") as output:
                     run(["docker", "image", "save", *identifiers], output=output, timeout=3600)
                 source.chmod(0o600)
@@ -307,17 +402,17 @@ def main():
     parser.add_argument("--config", required=True)
     parser.add_argument("--include-images", action="store_true")
     parser.add_argument("--prepare-only", action="store_true", help="Encrypt and queue; do not contact Telegram")
+    parser.add_argument("--force", action="store_true", help="Create a fresh recovery copy even if one was delivered today; reuse matching image bundles")
     args = parser.parse_args()
     os.umask(0o077)
     try:
-        backup(load_config(args.config), include_images=args.include_images, prepare_only=args.prepare_only)
-    except SafeError as error:
-        print(str(error), file=sys.stderr)
+        progress("configuration")
+        backup(load_config(args.config), include_images=args.include_images,
+               prepare_only=args.prepare_only, force=args.force)
+    except Exception as error:
+        log_failure(error)
         return 1
-    except Exception:
-        print("Recovery job failed; private values and command output were suppressed.", file=sys.stderr)
-        return 1
-    print("Recovery job completed. Delivery is pending when --prepare-only was used.")
+    progress("complete.queued" if args.prepare_only else "complete.delivered-or-already-current")
     return 0
 
 

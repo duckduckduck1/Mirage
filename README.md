@@ -21,8 +21,9 @@ profiles; restarting Throne restored its TCP/gRPC connections as well.
 - Caddy terminates HTTPS for subscriptions. Administration uses an SSH tunnel.
 - The native Telegram bot provides administrative commands and alerts.
 - GitHub Environment Secrets supply runtime tokens through a manual workflow.
-- Host tasks provide validated certificate publication and encrypted recovery
-  delivery. Persistent data and credentials remain outside the repository.
+- Host tasks provide certificate publication, manual encrypted recovery delivery
+  and a nightly server-status message. Automatic backups are disabled. Persistent
+  data and credentials remain outside the repository.
 
 ## Documentation
 

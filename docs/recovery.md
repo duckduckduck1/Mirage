@@ -5,8 +5,9 @@
 **Status: downloaded restoration rehearsal passed on 2026-10-25.** The actual
 Telegram delivery was downloaded, authenticated, decrypted on the workstation
 and restored as a separate VPS project. Four users, both subscription formats
-and all sixteen user/transport combinations passed. Daily backup scheduling is
-enabled. Older encrypted Marzban recovery material remains separate.
+and all sixteen user/transport combinations passed. Automatic backups were disabled
+by owner choice on 2026-10-28; manual encrypted recovery delivery remains available.
+Older encrypted Marzban recovery material remains separate.
 
 The measured prepared-archive restoration check took approximately 44 seconds;
 download/decryption, provisioning a replacement VPS and DNS changes are excluded.
@@ -82,8 +83,8 @@ commit or upload plaintext. Remove temporary decrypted data after the rehearsal.
 7. For actual recovery, restore ACME at the recorded private location and merge
    only the saved ACME cron entry. Do not overwrite unrelated root jobs. Check
    DNS credentials and certificate reload consumers before enabling renewal.
-   Reestablish GitHub token delivery and enable backup scheduling only on the
-   intended production instance.
+   Reestablish GitHub token delivery. Keep automatic backups disabled and enable
+   only the nightly status timer on the intended production instance.
 
 During offline restore, keep verified local image-ID tags. Once registry access
 returns, explicitly pull the recorded official digest, verify the image identity
@@ -102,7 +103,8 @@ not contain the bot token and are not a replacement for downloaded archives.
 ## Recovery archive contents
 
 The bundle includes a consistent SQLite snapshot, additional database-directory
-state, TLS releases, ACME account/configuration, Compose/private host settings,
+state excluding transient files, a stable panel-metrics copy, TLS releases,
+ACME account/configuration, Compose/private host settings,
 host tasks, the relevant ACME cron entry, image identity metadata and this guide.
 Image payloads are delivered separately and linked by bundle ID. Keep every image
 bundle referenced by retained recovery snapshots.

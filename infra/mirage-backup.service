@@ -1,5 +1,5 @@
 [Unit]
-Description=Encrypted Mirage recovery copy to the administrator Telegram chat
+Description=Manual encrypted Mirage recovery copy to the administrator Telegram chat
 After=network-online.target docker.service
 Wants=network-online.target
 StartLimitIntervalSec=0
@@ -8,9 +8,10 @@ StartLimitIntervalSec=0
 Type=oneshot
 User=root
 UMask=0077
-ExecStart=/usr/bin/python3 /opt/mirage/infra/backup.py --config /etc/mirage/host.json
-Restart=on-failure
-RestartSec=15min
+ExecStart=/usr/bin/python3 /opt/mirage/infra/backup.py --config /etc/mirage/host.json --force
+CPUQuota=30%
+CPUWeight=20
+Restart=no
 TimeoutStartSec=2h
 PrivateTmp=true
 ProtectSystem=full

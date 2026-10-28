@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-28 — Manual backups and nightly status
+
+- Added safe backup stage/error metadata, gzip level 1, pre-stat transient-file
+  filtering and a stable copy of panel metric history during atomic replacement.
+- Capped the manual backup service at 30% CPU with weight 20; added `--force`
+  without re-exporting unchanged images. Disabled automatic backups and retries.
+- Added a small 03:00 Saratov server-status message using the existing private
+  Telegram recipient. It checks services, local listeners and subscription TLS;
+  it does not claim authenticated client or ISP reachability.
+- Verified fresh encrypted recovery delivery and the status message without
+  restarting VPN services or changing clients, subscriptions or bot settings.
+
 ## 2026-10-27 — Effective XHTTP TCP timeout
 
 - Set `GODEBUG=multipathtcp=0` for 3x-ui and its child core so the pinned runtime
