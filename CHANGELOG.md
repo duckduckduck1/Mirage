@@ -2,6 +2,9 @@
 
 ## 2026-11-11 — Host headroom and helper failure paths
 
+- Pinned the official age archive and its SHA-256 for CI after runner apt DNS
+  failure; all 35 tests passed locally with the verified tools.
+
 - Retired unused firmware-refresh jobs and the obsolete Certbot schedule after
   dependency checks; preserved production ACME/DNS, OS security updates and all
   containers without restarting the VPN.

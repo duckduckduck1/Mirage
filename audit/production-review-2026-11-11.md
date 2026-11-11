@@ -427,8 +427,21 @@ promise that legitimate traffic can never saturate the CPU. If sustained pressur
 continues after this cleanup, compare the same workload on a larger allocation
 before changing alert thresholds or imposing a VPN CPU quota.
 
-Local checks: 35 tests ran, with 33 passes and two explicit age-tool integration skips;
+Local checks: all 35 tests passed after temporary, checksum-verified age tools
+were made available; the earlier run had two explicit integration skips;
 documentation/secret checking and both Compose renderings passed. Phone evidence
 remains limited to the previously reported TCP/gRPC result. Application/core
 upgrades, broader mobile import/auto-selection acceptance and certificate rotation
 under a continuous VPN transfer remain separate planned work.
+
+
+### CI dependency verification
+
+The first push/PR runs failed before tests because the GitHub runner could not
+resolve Ubuntu's archive mirror while installing age. The CI step now downloads
+only the [official age 1.3.2 archive](https://github.com/FiloSottile/age/releases/tag/v1.3.2),
+checks its pinned SHA-256 against the release asset digest and exposes the two
+required binaries on the runner PATH. It does not run apt or install host packages.
+The same verified archive passed all 35 local tests, including encrypted recovery
+and resumed delivery, without skips. This change affects CI only; the VPS age
+installation and disabled automatic backup schedule were not changed.
