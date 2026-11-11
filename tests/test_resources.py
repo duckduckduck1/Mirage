@@ -14,6 +14,35 @@ import resources
 
 
 class ResourceTests(unittest.TestCase):
+    def test_network_counters_exclude_duplicate_interfaces_and_handle_reset(self):
+        with tempfile.TemporaryDirectory() as directory:
+            proc = Path(directory)
+            (proc / "net").mkdir()
+            (proc / "net/dev").write_text("header\nheader\n" + "".join(
+                name + ": " + " ".join(str(i) for i in range(16)) + "\n"
+                for name in ("lo", "veth0123", "docker0", "br-abc", "ens1")))
+            (proc / "net/softnet_stat").write_text("00000010 00000002 00000003\n00000020 00000000 00000001\n")
+            net = resources.network(proc)
+            self.assertEqual(set(net["interfaces"]), {"ens1"})
+            self.assertEqual(net["interfaces"]["ens1"]["tx_packets"], 9)
+            self.assertEqual(net["softnet"], {"processed": 48, "dropped": 2, "time_squeeze": 4})
+        self.assertEqual(resources.counter_deltas({"a": 10, "b": 5, "c": 4}, {"a": 7, "b": 9}),
+                         {"a": 3, "b": None, "c": None})
+
+    def test_socket_history_keeps_only_transport_counts_without_addresses(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "net").mkdir()
+            (root / "net/tcp").write_text("header\n0: 010200C0:01BB 02C63364:1234 01\n"
+                                         "1: 010200C0:0805 02C63364:1234 08\n"
+                                         "2: 010200C0:0050 02C63364:1234 01\n")
+            (root / "net/tcp6").write_text("header\n0: 00000000000000000000000000000000:01BB 0:0 0A\n")
+            result = resources.vpn_sockets(root)
+            self.assertEqual(result["443"], {"established": 1, "listen": 1})
+            self.assertEqual(result["2053"], {"close_wait": 1})
+            self.assertNotIn("010200C0", json.dumps(result))
+            self.assertNotIn("1234", json.dumps(result))
+
     def test_proc_stat_with_parentheses_does_not_read_arguments(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "42"

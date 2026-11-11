@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-11-11 — Host headroom and helper failure paths
+
+- Pinned the official age archive and its SHA-256 for CI after runner apt DNS
+  failure; all 35 tests passed locally with the verified tools.
+
+- Retired unused firmware-refresh jobs and the obsolete Certbot schedule after
+  dependency checks; preserved production ACME/DNS, OS security updates and all
+  containers without restarting the VPN.
+- Extended the existing 64 MiB resource history with uplink/softnet counters,
+  transport TCP state counts and panel/core FD measurements, without addresses.
+- Added bounded authenticated HTTPS checks to the existing nightly status job;
+  verified all four transports with no Telegram delivery during acceptance.
+- Validated ports before issuing maintenance credentials and added independent
+  expiry/cleanup for each delivery token, including CLI/API failures.
+- Added curl HTTP failure handling for the next planned container recreation;
+  aligned the isolated test example with the measured 512 MiB ceiling.
+
+## 2026-11-11 — Production transport correction
+
+- Replaced the unreachable gRPC REALITY target with the separately tested TCP
+  target and matching accepted/advertised SNI; retained credentials and URLs.
+- Applied native TCP keepalive/user-timeout settings on 443 and verified their
+  kernel enforcement on ordinary TCP listener and accepted sockets.
+- Rechecked sixteen user/transport HTTPS cases, four exact XHTTP payloads and
+  first/repeated subscriptions; Hiddify core 5.5.5 passed through SSH as well.
+- Recorded the first application's erroneous IPv4-only socket guard and rollback;
+  corrected dual-stack verification and completed the second application.
+- Preserved versions, other inbounds, bot/settings, container configurations and
+  disabled automatic backups. Owner confirmed TCP/gRPC traffic on one Hiddify
+  5.5.5 phone; broader mobile/import acceptance remains separate.
+
 ## 2026-10-28 — Manual backups and nightly status
 
 - Added safe backup stage/error metadata, gzip level 1, pre-stat transient-file

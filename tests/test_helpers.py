@@ -1,6 +1,8 @@
 """Local failure-path checks; no Docker daemon, VPS or real Telegram requests."""
 
 import io
+import contextlib
+import hashlib
 import json
 import os
 import shutil
@@ -9,6 +11,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -433,6 +436,29 @@ class CertificateTests(PrivateFixture):
 
 
 class NativeProvisionTests(PrivateFixture):
+    def setUp(self):
+        super().setUp()
+        (self.state / "db").mkdir(mode=0o700)
+        self.database = self.state / "db" / "x-ui.db"
+        with contextlib.closing(sqlite3.connect(self.database)) as db, db:
+            db.execute("CREATE TABLE api_tokens (id INTEGER PRIMARY KEY, name TEXT, token TEXT, "
+                       "scope TEXT, expires_at INTEGER, enabled INTEGER)")
+            db.execute("INSERT INTO api_tokens VALUES (1, 'unrelated', 'existing-hash', 'admin', 0, 1)")
+        self.database.chmod(0o600)
+
+    def mint(self, *args, output=True, fail=False):
+        name = args[args.index("-tokenName") + 1]
+        with contextlib.closing(sqlite3.connect(self.database)) as db, db:
+            db.execute("INSERT INTO api_tokens (name,token,scope,expires_at,enabled) VALUES (?,?, 'admin',0,1)",
+                       (name, hashlib.sha256(b"fixture-value").hexdigest()))
+        if fail:
+            raise host.SafeError("Command failed; output suppressed")
+        return b"apiToken: fixture-value\n" if output else b"unexpected CLI output\n"
+
+    def assert_cleaned(self):
+        with contextlib.closing(sqlite3.connect(self.database)) as db, db:
+            self.assertEqual(db.execute("SELECT name,enabled FROM api_tokens").fetchall(), [("unrelated", 1)])
+
     def test_native_api_preserves_settings_and_revokes_temporary_token(self):
         settings = {"webPort": 12080, "twoFactorEnable": True, "panelOutbound": "existing",
                     "subPort": 12081, "unrelated": "preserved"}
@@ -453,8 +479,6 @@ class NativeProvisionTests(PrivateFixture):
                 endpoint = request.full_url.split("/setting/")[1]
                 payload = json.loads(request.data) if request.data else None
                 sent.append((endpoint, payload))
-                if endpoint == "apiTokens":
-                    return Response([{"id": 7, "name": "mirage-secret-delivery"}])
                 if endpoint == "all":
                     return Response(settings.copy())
                 if endpoint == "update":
@@ -462,15 +486,94 @@ class NativeProvisionTests(PrivateFixture):
                     settings["hasTgBotToken"] = True
                 return Response(None)
 
-        with mock.patch.object(provision, "compose", return_value=b"apiToken: fixture-value\n"), mock.patch.object(provision.urllib.request, "build_opener", return_value=Opener()):
+        with mock.patch.object(provision, "compose", side_effect=self.mint), mock.patch.object(provision.urllib.request, "build_opener", return_value=Opener()):
             provision.apply_bot(self.config, host.read_env(self.config))
         self.assertEqual(settings["unrelated"], "preserved")
         self.assertTrue(settings["twoFactorEnable"])
         self.assertFalse(settings["tgBotBackup"])
-        self.assertEqual(sent[-1], ("apiTokens/setEnabled/7", {"enabled": False, "expectedScope": "admin"}))
+        self.assertEqual(sent[-1][0], "all")
+        self.assert_cleaned()
+
+    def test_invalid_port_never_issues_a_token(self):
+        with mock.patch.object(provision, "compose") as command:
+            with self.assertRaises(host.SafeError):
+                provision.apply_bot(self.config, {"PANEL_PORT": "invalid"})
+        command.assert_not_called()
+        self.assert_cleaned()
+
+    def test_cli_failure_and_malformed_output_both_remove_owned_token(self):
+        for options in ({"fail": True}, {"output": False}):
+            with self.subTest(options=options), mock.patch.object(provision, "compose", side_effect=lambda *a: self.mint(*a, **options)):
+                with self.assertRaises(host.SafeError):
+                    with provision.temporary_token(self.config):
+                        self.fail("Failed issuance must never expose a credential")
+            self.assert_cleaned()
+
+    def test_expiry_is_armed_before_api_access_and_error_cleanup_does_not_need_api(self):
+        with mock.patch.object(provision, "compose", side_effect=self.mint):
+            with self.assertRaises(OSError):
+                with provision.temporary_token(self.config):
+                    with contextlib.closing(sqlite3.connect(self.database)) as db, db:
+                        deadline, = db.execute("SELECT expires_at FROM api_tokens WHERE name!='unrelated'").fetchone()
+                    self.assertGreater(deadline, time.time() * 1000)
+                    self.assertLessEqual(deadline, time.time() * 1000 + 300000)
+                    raise OSError("Private API failure")
+        self.assert_cleaned()
 
 
 class StatusTests(PrivateFixture):
+    def profiles(self):
+        environment = host.read_env(self.config)
+        return [{"outbounds": [{"protocol": "trojan" if name == "TROJAN_PORT" else "vless",
+                                "settings": {"address": "vpn.example.com", "port": int(environment[name]),
+                                             "password": "PRIVATE_FIXTURE"}}]}
+                for name in status.TRANSPORTS]
+
+    def test_subscription_requires_four_distinct_expected_ports(self):
+        configs = self.profiles()
+        parsed = status.parse_profiles(configs, host.read_env(self.config))
+        self.assertEqual(set(parsed), {"tcp", "grpc", "xhttp", "trojan"})
+        self.assertTrue(all(o["settings"]["address"] == "127.0.0.1" for o in parsed.values()))
+        self.assertEqual(configs[0]["outbounds"][0]["settings"]["address"], "vpn.example.com")
+        for bad in ([], {}, configs[:3], [configs[0]] * 4):
+            with self.subTest(bad_type=type(bad).__name__), self.assertRaises(host.SafeError):
+                status.parse_profiles(bad, host.read_env(self.config))
+
+    def test_probe_rejects_http_200_and_always_cleans_up_child(self):
+        child = mock.Mock(stdin=io.BytesIO())
+        child.poll.return_value = None
+        child.wait.side_effect = [subprocess.TimeoutExpired("probe", 2), 0]
+        reservation = mock.MagicMock()
+        reservation.__enter__.return_value.getsockname.return_value = ("127.0.0.1", 45001)
+        with mock.patch.object(status.socket, "socket", return_value=reservation), \
+                mock.patch.object(status.subprocess, "Popen", return_value=child), \
+                mock.patch.object(status.socket, "create_connection"), \
+                mock.patch.object(status.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, b"200")):
+            self.assertFalse(status.probe({}, Path("/fixture/core")))
+        child.terminate.assert_called_once()
+        child.kill.assert_called_once()
+
+    def test_probe_timeout_always_cleans_up_child(self):
+        child = mock.Mock(stdin=io.BytesIO())
+        child.poll.return_value = None
+        reservation = mock.MagicMock()
+        reservation.__enter__.return_value.getsockname.return_value = ("127.0.0.1", 45001)
+        with mock.patch.object(status.socket, "socket", return_value=reservation), \
+                mock.patch.object(status.subprocess, "Popen", return_value=child), \
+                mock.patch.object(status.socket, "create_connection"), \
+                mock.patch.object(status.subprocess, "run", side_effect=subprocess.TimeoutExpired("curl", 10)):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                status.probe({}, Path("/fixture/core"))
+        child.terminate.assert_called_once()
+        child.wait.assert_called_once()
+
+    def test_check_only_never_sends_telegram(self):
+        with mock.patch.object(sys, "argv", ["status.py", "--config", str(self.config_path), "--check-only"]), \
+                mock.patch.object(status, "check", return_value=({"healthy": True}, "fixture")), \
+                mock.patch.object(status, "notify") as send, mock.patch.object(sys, "stdout", io.StringIO()):
+            self.assertEqual(status.main(), 0)
+        send.assert_not_called()
+
     def test_failed_server_check_sends_warning_without_private_error_text(self):
         output = io.StringIO()
         with mock.patch.object(sys, "argv", ["status.py", "--config", str(self.config_path)]), \

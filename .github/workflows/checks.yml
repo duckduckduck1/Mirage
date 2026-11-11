@@ -19,8 +19,14 @@ jobs:
       - uses: actions/checkout@v5
       - name: Check documentation and accidental secret additions
         run: python3 scripts/check.py
-      - name: Install encryption tool for recovery tests
-        run: sudo apt-get update -qq && sudo apt-get install -y age
+      - name: Install pinned encryption tools for recovery tests
+        run: |
+          curl --fail --location --silent --show-error --connect-timeout 10 --max-time 45 --retry 2 \
+            https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-linux-amd64.tar.gz \
+            --output "$RUNNER_TEMP/age.tar.gz"
+          printf '%s  %s\n' cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10 "$RUNNER_TEMP/age.tar.gz" | sha256sum --check
+          tar --extract --gzip --file "$RUNNER_TEMP/age.tar.gz" --directory "$RUNNER_TEMP" age/age age/age-keygen
+          printf '%s\n' "$RUNNER_TEMP/age" >> "$GITHUB_PATH"
       - name: Exercise host helper failure paths and recovery encryption
         run: python3 -m unittest discover -s tests -v
       - name: Validate Compose with safe example settings

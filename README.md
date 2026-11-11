@@ -13,6 +13,8 @@ certificate-rotation and client/observation
 results are tracked in the [deployment review](audit/3x-ui-candidate.md).
 The [core compatibility pin](docs/operations.md#core-compatibility) restored phone
 profiles; restarting Throne restored its TCP/gRPC connections as well.
+The [2026-11-11 production review](audit/production-review-2026-11-11.md) records
+the subsequent gRPC/TCP correction, host cleanup and remaining mobile checks.
 
 ## Architecture
 
