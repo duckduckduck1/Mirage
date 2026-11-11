@@ -16,6 +16,50 @@ SEGMENT_BYTES = 4 * 1024 * 1024
 MAX_AGE = 7 * 86400
 TICKS = os.sysconf("SC_CLK_TCK")
 PAGE = os.sysconf("SC_PAGE_SIZE")
+VPN_PORTS = (443, 8443, 2053, 9443)
+
+
+def network(proc):
+    interfaces = {}
+    try:
+        for line in (proc / "net/dev").read_text().splitlines()[2:]:
+            name, counters = line.split(":", 1)
+            name, values = name.strip(), counters.split()
+            # Keep physical/uplink counters separate: bridges and veth duplicate traffic.
+            if (not re.fullmatch(r"[a-zA-Z0-9_.-]{1,32}", name)
+                    or name.startswith(("lo", "veth", "docker", "br-", "tun", "wg"))):
+                continue
+            interfaces[name] = dict(zip(
+                ("rx_bytes", "rx_packets", "rx_errors", "rx_dropped",
+                 "tx_bytes", "tx_packets", "tx_errors", "tx_dropped"),
+                (int(values[i]) for i in (0, 1, 2, 3, 8, 9, 10, 11))))
+        totals = [0, 0, 0]
+        with (proc / "net/softnet_stat").open() as source:
+            for line in source:
+                for i, value in enumerate(line.split()[:3]):
+                    totals[i] += int(value, 16)
+        softnet = dict(zip(("processed", "dropped", "time_squeeze"), totals))
+    except (OSError, ValueError, IndexError):
+        softnet = {}
+    return {"interfaces": interfaces, "softnet": softnet}
+
+
+def vpn_sockets(path):
+    # Read the panel's network namespace. Never retain local/remote IPs or client ports.
+    result = {str(port): {} for port in VPN_PORTS}
+    for family in ("tcp", "tcp6"):
+        with (path / "net" / family).open() as source:
+            next(source, None)
+            for line in source:
+                fields = line.split()
+                port = str(int(fields[1].split(":")[1], 16))
+                if port in result:
+                    state = {"01": "established", "02": "syn_sent", "03": "syn_recv",
+                             "04": "fin_wait1", "05": "fin_wait2", "06": "time_wait",
+                             "07": "close", "08": "close_wait", "09": "last_ack",
+                             "0A": "listen", "0B": "closing", "0C": "new_syn_recv"}.get(fields[3], "other")
+                    result[port][state] = result[port].get(state, 0) + 1
+    return result
 
 
 def pairs(path):
@@ -71,6 +115,16 @@ def snapshot(proc=Path("/proc"), cgroups=Path("/sys/fs/cgroup")):
             continue
         try:
             item = process(path)
+            if item["container"] and (item["name"] == "x-ui" or item["name"].startswith("xray-linux-")):
+                try:
+                    item["fd_count"] = sum(1 for _ in (path / "fd").iterdir())
+                    if item["name"] == "x-ui":
+                        item["vpn_sockets"] = vpn_sockets(path)
+                    if process(path)["start_ticks"] != item["start_ticks"]:
+                        continue  # PID was reused while reading the namespace.
+                except (OSError, ValueError, IndexError):
+                    item.pop("vpn_sockets", None)
+                    item.pop("fd_count", None)
             processes[(item["pid"], item["start_ticks"])] = item
         except (OSError, ValueError, IndexError):
             skipped += 1  # Exited processes and kernel races must not stop collection.
@@ -104,11 +158,18 @@ def snapshot(proc=Path("/proc"), cgroups=Path("/sys/fs/cgroup")):
         "vm": {key: vm.get(key, 0) for key in ("oom_kill", "pgmajfault", "pswpin", "pswpout")},
         "psi": {key: pressure(proc / "pressure" / key) for key in ("cpu", "memory", "io")},
         "processes": processes, "skipped_processes": skipped, "containers": groups,
+        "network": network(proc),
     }
 
 
 def deltas(current, previous):
     return {key: max(0, value - previous.get(key, value)) for key, value in current.items()}
+
+
+def counter_deltas(current, previous):
+    # A new interface or a reset/wrapped counter has no valid interval delta.
+    return {key: value - previous[key] if key in previous and value >= previous[key] else None
+            for key, value in current.items()}
 
 
 def record(before, after, names):
@@ -123,6 +184,8 @@ def record(before, after, names):
         # Newly observed processes have no complete interval; use null, not lifetime CPU.
         row = {key: item[key] for key in ("pid", "start_ticks", "name", "state", "rss_bytes")}
         row["container"] = names.get(item["container"], item["container"])
+        if "fd_count" in item:
+            row["fd_count"] = item["fd_count"]
         row["cpu_pct"] = (round(max(0, item["ticks"] - previous["ticks"]) * 100 / TICKS / elapsed, 2)
                           if previous else None)
         for key in ("major_faults", "read_bytes", "write_bytes"):
@@ -133,6 +196,10 @@ def record(before, after, names):
         selected[row["pid"]] = row
     for row in sorted(rows, key=lambda item: item["rss_bytes"], reverse=True)[:5]:
         selected[row["pid"]] = row
+    # Always retain core/panel measurements, even when another process tops the host.
+    for row in rows:
+        if row["name"] == "x-ui" or row["name"].startswith("xray-linux-"):
+            selected[row["pid"]] = row
     containers = {}
     for identifier, item in after["containers"].items():
         old = before["containers"].get(identifier, {})
@@ -142,8 +209,15 @@ def record(before, after, names):
             "cpu_pct": round(cpu_delta.get("usage_usec", 0) / elapsed / 10000, 2),
             "memory_events_delta": deltas(item["memory_events"], old.get("memory_events", {})),
         }
+    for item in after["processes"].values():
+        if "vpn_sockets" in item and item["container"] in after["containers"]:
+            containers[names.get(item["container"], item["container"])]["vpn_sockets"] = item["vpn_sockets"]
+    net, old_net = after.get("network", {}), before.get("network", {})
+    interfaces = {name: {"counters": counters, "delta": counter_deltas(
+                    counters, old_net.get("interfaces", {}).get(name, {}))}
+                  for name, counters in net.get("interfaces", {}).items()}
     return {
-        "schema": 1, "time_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "schema": 2, "time_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "interval_seconds": round(elapsed, 3), "cpu_pct": percentages,
         "scheduler": after.get("scheduler", {}),
         "memory_kib": after["memory_kib"], "vm": after["vm"],
@@ -152,6 +226,8 @@ def record(before, after, names):
         "exited_processes": len(before["processes"].keys() - after["processes"].keys()),
         "new_processes": len(after["processes"].keys() - before["processes"].keys()),
         "processes": list(selected.values()), "containers": containers,
+        "network": {"interfaces": interfaces, "softnet": net.get("softnet", {}),
+                    "softnet_delta": counter_deltas(net.get("softnet", {}), old_net.get("softnet", {}))},
     }
 
 
