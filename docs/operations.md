@@ -31,11 +31,18 @@ At **03:00 Europe/Saratov**, [mirage-status.timer](../infra/mirage-status.timer)
 runs a small [host check](../infra/status.py) and sends one message to the same
 private administrator chat. It checks the two container states, the Xray process,
 the local panel, the subscription TLS certificate and four listening TCP ports.
-It includes available host RAM. A failed check sends a warning instead of a
+It fetches one enabled client's native JSON subscription over verified HTTPS and
+uses the running core binary in sequential, short-lived clients to request HTTPS
+through each profile. Credentials stay in memory; probe processes are terminated
+after each request. It includes available host RAM. A failed check sends a warning instead of a
 success message; a failed Telegram send is recorded as a delivery failure.
 
-This does not exercise authenticated profiles or demonstrate reachability from a
-client ISP. The native weekly report remains unchanged. No extra bot, continuous
+The test requires the four configured transports in that subscription and at
+least 128 MiB host available RAM. An absent client, missing profile, malformed
+response or low memory cannot produce a success message. It tests one account
+from VPS loopback and an external HTTPS target, not all users or reachability
+from a client ISP. Target outages can also fail the check; compare a second target
+manually before changing the VPN. The native weekly report remains unchanged. No extra bot, continuous
 monitor, traffic logging or VPN restart is involved. The native Telegram report
 schedule is registered at panel startup, so changing it alone cannot activate a
 new schedule without restarting the panel in this version.
@@ -47,10 +54,21 @@ sudo systemctl enable --now mirage-status.timer
 sudo systemctl start mirage-status.service
 ```
 
-The status service is capped at 30% of one CPU and 64 MiB; it has no automatic
+The status service and its children are capped at 30% of one CPU and 96 MiB; it has no automatic
 retry. A complete VPS outage also prevents its message. Missing nightly status
 is a reason to check, not independent proof of VPN failure. Immediate host-down
 detection requires an external monitor.
+
+For a diagnostic run without a Telegram message, use a transient unit:
+
+```bash
+sudo systemd-run --unit=mirage-status-check --wait --pipe --collect \
+  -p CPUQuota=30% -p CPUWeight=20 -p MemoryMax=96M -p RuntimeMaxSec=2min \
+  /usr/bin/python3 /opt/mirage/infra/status.py --config /etc/mirage/host.json --check-only
+```
+
+Running Python directly bypasses the unit's limits. A check
+does not restart production Xray or alter profiles, routes or subscription URLs.
 
 ## Secret management
 
@@ -122,7 +140,15 @@ migration. Unprepared or mismatched targets are rejected.
 
 With `apply_bot=true`, it also applies Telegram settings through the native panel
 API on host loopback, preserving other settings. The native CLI supplies a named
-temporary API token into memory; the token is disabled afterwards. Telegram
+temporary API token into memory. Each invocation uses a unique reserved name.
+On the reviewed v3.10.2 schema the helper sets a five-minute expiry immediately
+after issuance and removes only that invocation's credential in a `finally`
+block, including CLI-output/API failures. This narrowly scoped SQLite credential
+cleanup is needed because that CLI has no expiry flag; it never writes user or
+settings tables. Cleanup does not depend on the API being reachable. An abrupt
+process death between issuance and arming expiry remains a cleanup risk; inspect
+reserved credentials after an interrupted delivery. Schema changes require review
+before an application upgrade. Telegram
 values travel in an HTTP body, not process arguments. This path was tested with
 the installed image; the owner confirmed the administrative menu and four users.
 Enabling the bot can send native messages.
@@ -281,9 +307,34 @@ prepare rollback first. Do not build a custom core or silently switch to latest.
 TCP connection, profile import and ping are not sufficient traffic evidence.
 Several transports on one IP do not provide an independent IP fallback.
 
+### Mobile import and acceptance
+
+Use the existing private subscription URL, not a single transport's QR code.
+On a test phone, disconnect other VPN applications, import that subscription
+once in Hiddify and wait for its profiles. Do not distribute links publicly or
+create repeated duplicate imports after a timeout. If import fails, record the
+app error, time and Wi-Fi/mobile network; check HTTPS subscription delivery
+separately from VPN authentication.
+
+For a controlled baseline, select Trojan manually, open a website and play video.
+Then test TCP and gRPC individually. Check XHTTP on the actual app before relying
+on it. Finally test sleep/resume, mobile/Wi-Fi transitions, reconnect and updating
+the existing subscription. Test auto-selection only after the individual profiles
+work. A test changes no server bindings; friends' default profile set has not been
+reduced or accepted as a new configuration.
+
+| Client evidence | Date | Scope |
+| --- | --- | --- |
+| Hiddify 5.5.5 phone | 2026-11-11 | Owner confirmed TCP/gRPC website traffic after refresh; OS/network not recorded |
+| Official Hiddify core 5.5.5 | 2026-11-11 | All transports through SSH; no mobile GUI, TUN or ISP coverage |
+| Throne desktop | 2026-10-25 | Owner confirmed TCP/gRPC and video after restart; historical result |
+
+Fresh import on both iOS and Android and post-connect auto-selection still need
+device evidence. The nightly VPS check cannot establish these results.
+
 ### Memory limits
 
-Production sets `XUI_MEMORY_LIMIT=512m`; the isolated test example retains 320m.
+Production and the isolated test example set `XUI_MEMORY_LIMIT=512m`.
 The same value applies to memory and combined memory/swap, so the container has
 no swap allowance. This is a ceiling, not a reservation of host RAM.
 
@@ -299,6 +350,23 @@ change; compare timestamps and counter deltas to identify a new event.
 The limit can be increased on the running container with `docker update`, without
 restarting Xray; keep the private environment and Compose configuration consistent.
 Do not disable the OOM killer or add automatic VPN restarts to hide memory pressure.
+
+### Host background jobs
+
+The 2026-11-11 host review found firmware refresh activity consuming up to
+190 MiB sampled RSS and coinciding with swap/pressure. On this KVM VPS, fwupd
+reported no updatable devices and no update history. Its service, refresh service
+and timer were masked after checking dependencies. The obsolete Certbot service
+and timer were also masked: nginx was disabled/inactive, no container mounted
+its lineage, and production renewal belongs to the existing acme.sh hook.
+Certificate files and packages were retained; no VPN container restarted.
+
+Available RAM increased from about 282 to 353 MiB in immediate snapshots. This
+is workload-dependent headroom, not a permanent capacity guarantee. Security
+update timers and unrelated application containers remain enabled. Do not copy
+these service masks to a different host without checking its dependencies.
+The [production review](../audit/production-review-2026-11-11.md) records verification
+and the remaining one-vCPU capacity limit.
 
 ### XHTTP connection cleanup
 
@@ -363,6 +431,35 @@ Local VPS traffic tests do not establish throughput or reliability on a particul
 ISP. The 512 MiB container ceiling also does not reserve RAM on the one-GiB host:
 compare host `MemAvailable` and memory pressure with container usage.
 
+### TCP REALITY and gRPC maintenance
+
+On 2026-11-11 the production TCP REALITY inbound on 443 received the same native
+60-second idle, 20-second interval and 60,000-millisecond user timeout documented
+for XHTTP above. Ordinary TCP and the effective options were verified on its
+listener and an accepted socket after the authorized core restart. Inspect both
+`tcp` and `tcp6` when locating sockets: a dual-stack IPv6 listener can still use
+ordinary TCP protocol 6.
+
+The previous gRPC REALITY target refused connections from the VPS. Its target
+and accepted/advertised SNI now match the separately checked TCP target. Existing
+gRPC clients must refresh their subscription; URLs, user credentials, REALITY
+keys, short IDs and service name are preserved. Check target reachability,
+TLS 1.3 and HTTP/2 before choosing a replacement; copying a once-working hostname
+is not ongoing availability evidence.
+
+All sixteen account/transport HTTPS checks, four exact XHTTP payloads and repeated
+raw/JSON subscriptions passed after application. Hiddify core 5.5.5 also passed
+through SSH. The owner also confirmed TCP and gRPC website access on one phone
+with Hiddify 5.5.5 after refreshing the existing subscription. Fresh import, both
+mobile platforms and auto-selection remain separate checks. See the
+[production review and application record](../audit/production-review-2026-11-11.md).
+The record includes the first application's false IPv4-only socket failure and
+rollback; three core restarts occurred across both attempts.
+
+Restarting cleared the old TCP/mux population. Keepalive reclaims unresponsive
+peers; it does not impose a lifetime on responsive mux pools. Do not treat an
+immediate socket/RAM decrease as a demonstrated lasting fix or schedule restarts.
+
 ### CPU alerts
 
 The one-vCPU host has no Docker CPU quota for 3x-ui: `cpu.max` is `max 100000`,
@@ -378,18 +475,27 @@ for an earlier spike. CPU settings and notification thresholds were not changed.
 
 `mirage-resources.service` samples host, process and Docker cgroup counters every
 15 seconds using the Python standard library. It records the five busiest and
-five largest resident processes (deduplicated), container names, CPU usage and
+five largest resident processes (deduplicated), plus the panel/core even when
+they are outside those lists. It records container names, CPU usage and
 throttling, memory usage/limits/OOM events, host available RAM, swap activity,
 major faults, CPU steal/I/O wait, scheduler counts and CPU/memory/I/O pressure.
 Process I/O deltas help correlate work such as an archive or download with a spike.
 Container names refresh every five minutes; unknown containers retain their ID.
+Schema 2 also records per-uplink byte/packet/error/drop counters, aggregate softnet
+drops/time-squeeze, core/panel FD counts and TCP state counts for production ports
+443, 8443, 2053 and 9443 in the panel's network namespace. Bridges/veth/loopback
+are excluded from uplink totals to avoid duplicate traffic. These counters are
+not per-user accounting or proof of application throughput. Null network deltas
+mean a first observation or counter reset. A PID identity change discards the
+in-progress namespace measurement. Port changes require a collector review.
 
 History stays on the VPS in `/var/log/mirage-resources/`, directory mode 0700 and
 files 0600. JSONL segments rotate at 4 MiB; retention is bounded by 64 MiB and
 seven-day archive age, whichever removes data sooner. Busy periods can shorten
 the available history. UTC timestamps and actual interval lengths are recorded.
 The collector does not read command arguments, environment variables, application
-databases, traffic, client URLs or tokens. Do not commit diagnostic files.
+databases, packet payloads, client URLs or tokens. Socket rows are reduced to
+counts; no peer addresses or client ports are retained. Do not commit diagnostic files.
 
 There are no new Telegram messages, external uploads, scheduled analysis or VPN
 restarts. Only the collector itself restarts on failure. It runs at low CPU/I/O
