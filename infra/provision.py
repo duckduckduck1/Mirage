@@ -2,16 +2,21 @@
 """Deliver GitHub Environment secrets to an already prepared host; never install it."""
 
 import argparse
+import contextlib
+import hashlib
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
+import uuid
 from pathlib import Path
 
-from host import (SafeError, compose, load_config, private_dir, read_env,
+from host import (SafeError, compose, load_config, private_dir, private_file, read_env,
                   telegram_settings, write_json)
 
 TARGETS = {"staging": Path("/etc/mirage-test/host.json"),
@@ -23,38 +28,61 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise SafeError("The local panel unexpectedly redirected a secret request.")
 
 
+@contextlib.contextmanager
+def temporary_token(config):
+    database = private_file(Path(config["state_dir"]) / "db" / "x-ui.db")
+    name = "mirage-secret-delivery-" + uuid.uuid4().hex
+    # v3.10.2's CLI has no expiry flag. Limit only this invocation's native
+    # credential in its reviewed SQLite schema; no user/settings tables are written.
+    try:
+        with contextlib.closing(sqlite3.connect(database.as_uri() + "?mode=rw", uri=True, timeout=5)) as db:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(api_tokens)")}
+            if not {"id", "name", "token", "scope", "expires_at", "enabled"} <= columns:
+                raise SafeError("The native credential schema differs from the reviewed version.")
+            try:
+                output = compose(config, "exec", "-T", "x-ui", "/app/x-ui", "setting", "-getApiToken",
+                                 "-tokenName", name, "-tokenScope", "admin").decode()
+                match = re.search(r"(?m)^apiToken:\s*(\S+)\s*$", output)
+                if not match:
+                    raise SafeError("The native CLI did not return its temporary API token.")
+                token = match[1]
+                with db:
+                    changed = db.execute("UPDATE api_tokens SET expires_at=? "
+                                         "WHERE name=? AND scope='admin' AND token=? AND enabled=1",
+                                         (int(time.time() * 1000) + 300000, name,
+                                          hashlib.sha256(token.encode()).hexdigest())).rowcount
+                    if changed != 1:
+                        raise SafeError("The temporary API credential could not be bounded.")
+                yield token
+            finally:
+                # The unique invocation name also covers CLI parse/listing failures.
+                # Native authentication reads this table for each request, without a restart.
+                with db:
+                    db.execute("DELETE FROM api_tokens WHERE name=? AND scope='admin'", (name,))
+                    if db.execute("SELECT count(*) FROM api_tokens WHERE name=?", (name,)).fetchone()[0]:
+                        raise SafeError("Temporary credential cleanup requires administrator review.")
+    except sqlite3.Error:
+        raise SafeError("Temporary credential storage/cleanup failed; inspect the host privately.") from None
+
+
 def apply_bot(config, environment):
-    # The upstream CLI emits this named token to a captured pipe, never argv/logs.
-    output = compose(config, "exec", "-T", "x-ui", "/app/x-ui", "setting", "-getApiToken",
-                     "-tokenName", "mirage-secret-delivery", "-tokenScope", "admin").decode()
-    match = re.search(r"(?m)^apiToken:\s*(\S+)\s*$", output)
-    if not match:
-        raise SafeError("The native CLI did not return its temporary API token.")
-    token = match[1]
     port = environment.get("PANEL_PORT", "")
     if not port.isdigit() or not 1 <= int(port) <= 65535:
         raise SafeError("Invalid local panel port.")
     base = "http://127.0.0.1:" + port + "/panel/api/setting/"
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
 
-    def request(endpoint, data=None, method="POST"):
-        body = json.dumps(data if data is not None else {}).encode() if method == "POST" else None
-        req = urllib.request.Request(base + endpoint, data=body, method=method,
-                                     headers={"Authorization": "Bearer " + token,
-                                              "Content-Type": "application/json"})
-        with opener.open(req, timeout=20) as response:
-            value = json.load(response)
-        if value.get("success") is not True:
-            raise SafeError("The native settings API rejected secret provisioning.")
-        return value.get("obj")
+    with temporary_token(config) as token:
+        def request(endpoint, data=None):
+            req = urllib.request.Request(base + endpoint, data=json.dumps(data or {}).encode(),
+                                         headers={"Authorization": "Bearer " + token,
+                                                  "Content-Type": "application/json"})
+            with opener.open(req, timeout=20) as response:
+                value = json.load(response)
+            if value.get("success") is not True:
+                raise SafeError("The native settings API rejected secret provisioning.")
+            return value.get("obj")
 
-    token_id = None
-    try:
-        rows = request("apiTokens", method="GET")
-        matches = [row for row in rows if row.get("name") == "mirage-secret-delivery"]
-        if len(matches) != 1:
-            raise SafeError("The temporary API token could not be identified.")
-        token_id = int(matches[0]["id"])
         settings = request("all")
         if not isinstance(settings, dict) or "webPort" not in settings or "twoFactorEnable" not in settings:
             raise SafeError("The candidate settings API differs from the reviewed schema.")
@@ -68,9 +96,6 @@ def apply_bot(config, environment):
                 or str(check.get("tgBotChatId")) != str(config["telegram_chat_id"])
                 or check.get("hasTgBotToken") is not True):
             raise SafeError("The panel did not confirm the expected Telegram settings.")
-    finally:
-        if token_id is not None:
-            request("apiTokens/setEnabled/" + str(token_id), {"enabled": False, "expectedScope": "admin"})
 
 
 def receive(target, payload):

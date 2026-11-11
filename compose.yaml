@@ -35,7 +35,7 @@ services:
     cap_drop: [NET_RAW]
     security_opt: [no-new-privileges:true]
     healthcheck:
-      test: [CMD, curl, --silent, --show-error, --max-time, "5", --output, /dev/null, "http://127.0.0.1:12080/"]
+      test: [CMD, curl, --fail, --silent, --show-error, --max-time, "5", --output, /dev/null, "http://127.0.0.1:12080/"]
       interval: 30s
       timeout: 6s
       retries: 3
